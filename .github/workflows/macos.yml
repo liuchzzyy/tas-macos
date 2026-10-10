@@ -1,0 +1,41 @@
+name: Native macOS
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift toolchain
+        run: swift --version
+      - name: Compatibility and recovery tests
+        run: swift test -c release
+      - name: Build native app and test installed resources
+        run: ./scripts/build-macos.sh
+      - name: Check archive
+        run: unzip -t dist/TAS-1.0.0-${{ matrix.arch }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TAS-macOS-${{ matrix.arch }}
+          path: |
+            dist/TAS-1.0.0-*.zip
+            dist/TAS-1.0.0-*.sha256
+            dist/build-report-*.txt
+          if-no-files-found: error
