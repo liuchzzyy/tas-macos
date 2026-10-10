@@ -326,12 +326,17 @@ public actor Vault {
         do { try require(config.bots.contains(where: \.enabled), "必须保留至少一个启用的机器人"); try config.saveBots(password: password) }
         catch { config.bots = previous; throw error }
     }
+    private static func canonicalPath(_ url: URL) throws -> String {
+        guard let resolved = realpath(url.path, nil) else { throw TASError("无法解析路径：\(url.path)") }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
     public func addFolder(_ url: URL) throws {
         try begin(); defer { busy = false }
         let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         try require(values.isDirectory == true && values.isSymbolicLink != true, "请选择普通文件夹")
-        let root = url.resolvingSymlinksInPath().standardizedFileURL.path
-        let vaultRoot = directory.resolvingSymlinksInPath().standardizedFileURL.path
+        let root = try Self.canonicalPath(url)
+        let vaultRoot = try Self.canonicalPath(directory)
         try require(root != vaultRoot && !root.hasPrefix(vaultRoot + "/"), "不能将文件库数据目录作为同步源")
         try db.run("INSERT OR IGNORE INTO sync_folders(local_path) VALUES(?)", [url.standardizedFileURL.path])
     }
@@ -341,6 +346,11 @@ public actor Vault {
         try begin(); defer { busy = false }; var changed = 0, failures: [String] = []
         for folder in try folders() where folder.enabled {
             let root = URL(fileURLWithPath: folder.path, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+            let rootPath: String
+            do { rootPath = try Self.canonicalPath(root) }
+            catch { failures.append("\(root.path)：\(error.localizedDescription)"); continue }
+            let vaultRoot = try Self.canonicalPath(directory)
+            let temporaryRoot = ProcessInfo.processInfo.environment["TAS_TMP_DIR"].flatMap { try? Self.canonicalPath(URL(fileURLWithPath: $0)) }
             var directories = [root]
             while let current = directories.popLast() {
                 try Task.checkCancellation()
@@ -353,14 +363,13 @@ public actor Vault {
                     do {
                         let attributes = try url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey])
                         if attributes.isSymbolicLink == true { continue }
-                        let vaultRoot = directory.resolvingSymlinksInPath().standardizedFileURL.path
-                        let temporaryRoot = ProcessInfo.processInfo.environment["TAS_TMP_DIR"].map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().standardizedFileURL.path }
-                        if [vaultRoot, temporaryRoot].compactMap({ $0 }).contains(where: { url.path == $0 || url.path.hasPrefix($0 + "/") }) { continue }
+                        let path = try Self.canonicalPath(url)
+                        if [vaultRoot, temporaryRoot].compactMap({ $0 }).contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { continue }
                         if attributes.isDirectory == true { directories.append(url); continue }
                         guard attributes.isRegularFile == true else { continue }
-                        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
-                        try require(url.path.hasPrefix(prefix), "同步文件不在所选目录内")
-                        let relative = String(url.path.dropFirst(prefix.count))
+                        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+                        try require(path.hasPrefix(prefix), "同步文件不在所选目录内")
+                        let relative = String(path.dropFirst(prefix.count))
                         let logical = try Paths.logical(relative)
                         let mtime = Int64((attributes.contentModificationDate ?? Date.distantPast).timeIntervalSince1970 * 1000)
                         if let state = try db.rows("SELECT * FROM sync_state WHERE folder_id=? AND relative_path=?", [folder.id, relative]).first,

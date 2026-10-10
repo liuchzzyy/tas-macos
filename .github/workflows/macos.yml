@@ -11,15 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-15-intel
-            arch: x86_64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -39,15 +31,17 @@ jobs:
         run: ./scripts/build-macos.sh
       - name: Launch the native SwiftUI window
         run: swift scripts/smoke-gui.swift "$PWD/dist/TAS.app/Contents/MacOS/TAS" "$PWD/dist"
-      - name: Check archive
-        run: unzip -t dist/TAS-1.0.0-${{ matrix.arch }}.zip
+      - name: Check disk image
+        run: |
+          hdiutil verify dist/TAS-1.0.0-arm64.dmg
+          shasum -a 256 -c dist/TAS-1.0.0-arm64.dmg.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: TAS-macOS-${{ matrix.arch }}
+          name: TAS-macOS-arm64
           path: |
-            dist/TAS-1.0.0-*.zip
-            dist/TAS-1.0.0-*.sha256
-            dist/build-report-*.txt
+            dist/TAS-1.0.0-arm64.dmg
+            dist/TAS-1.0.0-arm64.dmg.sha256
+            dist/build-report-arm64.txt
             dist/gui-launch-report.txt
             dist/TAS-native-window.png
           if-no-files-found: error

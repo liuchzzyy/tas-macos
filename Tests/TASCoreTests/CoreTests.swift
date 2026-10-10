@@ -164,12 +164,14 @@ final class CoreTests: XCTestCase {
         let modified = Date(timeIntervalSince1970: 1_700_000_000)
         try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: source.path)
         try await vault.addFolder(folder)
-        let first = try await vault.sync(); XCTAssertNil(first.warning)
+        let first = try await vault.sync(); XCTAssertNil(first.warning, first.warning ?? "")
         let files = try await vault.files(); XCTAssertEqual(files.map(\.filename), ["note.txt"])
         let sent = fake.counter
         _ = try await vault.sync(); XCTAssertEqual(fake.counter, sent)
         let database = try Database(directory: library)
-        let state = try database.rows("SELECT * FROM sync_state").first!
+        let states = try database.rows("SELECT * FROM sync_state")
+        XCTAssertEqual(states.count, 1)
+        guard let state = states.first else { return }
         XCTAssertEqual(number(state["mtime"]), 1_700_000_000_000)
         try Paths.atomicWrite(Data("second version".utf8), to: source)
         _ = try await vault.sync()

@@ -2,16 +2,13 @@
 
 用 **Swift + SwiftUI** 重写的 TAS（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套文件处理代码；运行和构建均不需要 npm、Node.js、Electron、WebView 或 Rust。
 
-支持 macOS 13 及以上，分别构建 Apple Silicon 和 Intel 安装包。
+支持 macOS 13 及以上，仅构建 Apple Silicon (arm64) 的 DMG 安装包。
 
 ## 获取与运行
 
-在本仓库的 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 中打开最新成功的 **Native macOS** 构建，下载对应架构的 artifact：
+在本仓库的 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 中打开最新成功的 **Native macOS** 构建，下载 Apple Silicon artifact：`TAS-macOS-arm64`。
 
-- M 系列芯片：`TAS-macOS-arm64`
-- Intel：`TAS-macOS-x86_64`
-
-先解压 artifact，再解压其中的 `TAS-1.0.0-*.zip`，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
+先解压 GitHub artifact，再打开其中的 `TAS-1.0.0-arm64.dmg`，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 
 首次使用填写 Bot Token、Chat ID 和加密密码。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。
 
@@ -32,7 +29,7 @@
 
 ## 从源码构建
 
-需要 macOS、Xcode 或 Command Line Tools、Swift 6.0+：
+需要 Apple Silicon Mac、Xcode 或 Command Line Tools、Swift 6.0+：
 
 ```sh
 git clone https://github.com/liuchzzyy/tas-macos.git
