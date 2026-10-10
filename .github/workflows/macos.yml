@@ -27,6 +27,9 @@ jobs:
         run: swift --version
       - name: Compatibility and recovery tests
         run: swift test -c release
+      - name: Diagnose a macOS test crash
+        if: failure()
+        run: python3 scripts/crash-diagnostics.py
       - name: Build native app and test installed resources
         timeout-minutes: 8
         run: ./scripts/build-macos.sh
