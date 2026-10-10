@@ -26,10 +26,14 @@ jobs:
       - name: Swift toolchain
         run: swift --version
       - name: Compatibility and recovery tests
-        run: swift test -c release
+        run: env SWIFT_BACKTRACE=enable=yes,interactive=no,color=no swift test -c release
       - name: Diagnose a macOS test crash
         if: failure()
-        run: python3 scripts/crash-diagnostics.py
+        timeout-minutes: 2
+        run: |
+          python3 scripts/crash-diagnostics.py
+          test_bundle="$(swift build -c release --show-bin-path)/TASPackageTests.xctest"
+          xcrun lldb --batch -o run -o "thread backtrace all" -- "$(xcrun --find xctest)" -XCTest TASCoreTests.CoreTests/testSyncUsesLegacyRelativePathsAndSourceModificationTimes "$test_bundle"
       - name: Build native app and test installed resources
         timeout-minutes: 8
         run: ./scripts/build-macos.sh
