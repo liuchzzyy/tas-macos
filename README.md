@@ -6,7 +6,7 @@
 
 ## 获取与运行
 
-在本仓库的 [Actions](../../actions/workflows/macos.yml) 中打开最新成功的 **Native macOS** 构建，下载对应架构的 artifact：
+在本仓库的 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 中打开最新成功的 **Native macOS** 构建，下载对应架构的 artifact：
 
 - M 系列芯片：`TAS-macOS-arm64`
 - Intel：`TAS-macOS-x86_64`
@@ -82,6 +82,6 @@ tas sync start --watch
 
 每次 macOS CI 构建输出应用目录大小、ZIP 大小、架构和 CLI 启动测量，随 artifact 提供 `build-report-*.txt`。移除 Electron 的浏览器运行时能减少分发内容；具体体积以构建产物为准。
 
-Swift 原生界面有利于降低界面运行时开销，但不代表所有处理都会更快：网络速度仍受 Telegram 和网络限制；为了兼容旧格式，大文件 AES-GCM 使用 CryptoSwift，吞吐量需要单独实测，不能直接假定高于 Node/OpenSSL。
+Swift 原生界面有利于降低界面运行时开销，但不代表所有处理都会更快：网络速度仍受 Telegram 和网络限制；为了兼容旧格式，8 MiB 以内的文件使用 Apple CryptoKit 加速，大文件 AES-GCM 使用 CryptoSwift 流式处理，吞吐量需要单独实测，不能直接假定高于 Node/OpenSSL。
 
 源项目：[liuchzzyy/tas](https://github.com/liuchzzyy/tas)。MIT 许可与上游署名保留在 `LICENSE` 中。

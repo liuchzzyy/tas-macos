@@ -163,10 +163,11 @@ final class Database {
         try require(number(manifest["schemaVersion"]) == 1, "不支持的恢复索引版本")
         guard let files = manifest["files"] as? [JSON], let chunks = manifest["chunks"] as? [JSON] else { throw TASError("恢复索引格式错误") }
         let ids = Set(files.map { number($0["id"]) })
+        let chunksByFile = Dictionary(grouping: chunks) { number($0["file_id"]) }
         try require(ids.count == files.count && ids.allSatisfy { $0 > 0 }, "恢复索引文件编号无效")
         for file in files {
             _ = try Paths.logical(string(file["filename"]))
-            let owned = chunks.filter { number($0["file_id"]) == number(file["id"]) }.sorted { number($0["chunk_index"]) < number($1["chunk_index"]) }
+            let owned = (chunksByFile[number(file["id"])] ?? []).sorted { number($0["chunk_index"]) < number($1["chunk_index"]) }
             try require(owned.count == Int(number(file["chunks"])) && !owned.isEmpty && owned.count <= 65535, "恢复索引分块不完整")
             try require(owned.enumerated().allSatisfy { number($0.element["chunk_index"]) == Int64($0.offset) && !string($0.element["file_telegram_id"]).isEmpty }, "恢复索引分块编号无效")
             try require(number(file["original_size"]) >= 0 && string(file["hash"]).count == 64, "恢复索引文件信息无效")

@@ -70,7 +70,7 @@ public actor Vault {
         try await finishUpload(id, progress: progress)
         return await publishResult("上传完成", progress: progress)
     }
-    private func stage(_ source: URL, name: String?, replace: Bool, progress: ProgressHandler) throws -> Int64 {
+    private func stage(_ source: URL, name: String?, replace: Bool, knownHash: String? = nil, progress: ProgressHandler) throws -> Int64 {
         let filename = try Paths.logical(name ?? source.lastPathComponent)
         let properties = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         try require(properties.isRegularFile == true && properties.isSymbolicLink != true, "请选择普通文件")
@@ -78,7 +78,7 @@ public actor Vault {
         let existing = try db.rows("SELECT * FROM files WHERE filename=?", [filename]).first
         try require(replace || existing == nil, "同名文件已存在，请使用替换选项或修改逻辑路径")
         progress(TransferProgress("计算校验值 · \(filename)"))
-        let hash = try Crypto.hashFile(source); let compressed = Crypto.shouldCompress(filename)
+        let hash = try knownHash ?? Crypto.hashFile(source); let compressed = Crypto.shouldCompress(filename)
         let stagingRoot = ProcessInfo.processInfo.environment["TAS_TMP_DIR"].map { URL(fileURLWithPath: $0) } ?? directory.appendingPathComponent("tmp")
         let stage = try Paths.temporary(in: stagingRoot, prefix: "upload-"); try Paths.privateDirectory(stage)
         var persisted = false
@@ -338,21 +338,27 @@ public actor Vault {
         try begin(); defer { busy = false }; var changed = 0, failures: [String] = []
         for folder in try folders() where folder.enabled {
             let root = URL(fileURLWithPath: folder.path, isDirectory: true)
-            guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles], errorHandler: { _, _ in false }) else { failures.append("无法扫描 \(folder.path)"); continue }
+            guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles], errorHandler: { url, error in failures.append("\(url.path)：\(error.localizedDescription)"); return true }) else { failures.append("无法扫描 \(folder.path)"); continue }
             while let url = enumerator.nextObject() as? URL {
                 try Task.checkCancellation()
                 do {
-                    let attributes = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                    let attributes = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey])
                     if attributes.isSymbolicLink == true { enumerator.skipDescendants(); continue }
                     guard attributes.isRegularFile == true else { continue }
                     let relative = String(url.path.dropFirst(root.path.count + 1))
                     let logical = try Paths.logical(relative)
+                    let mtime = Int64((attributes.contentModificationDate ?? Date.distantPast).timeIntervalSince1970 * 1000)
+                    if let state = try db.rows("SELECT * FROM sync_state WHERE folder_id=? AND relative_path=?", [folder.id, relative]).first,
+                       number(state["mtime"]) == mtime,
+                       let stored = try db.rows("SELECT * FROM files WHERE filename=? AND hash=?", [logical, state["file_hash"]]).first,
+                       number(stored["original_size"]) == Int64(attributes.fileSize ?? -1),
+                       try db.rows("SELECT id FROM chunks WHERE file_id=?", [stored["id"]]).count == Int(number(stored["chunks"])) { continue }
                     let hash = try Crypto.hashFile(url)
                     if try db.rows("SELECT id FROM files WHERE filename=? AND hash=?", [logical, hash]).isEmpty {
-                        let id = try stage(url, name: logical, replace: true, progress: progress)
+                        let id = try stage(url, name: logical, replace: true, knownHash: hash, progress: progress)
                         try await finishUpload(id, progress: progress); changed += 1
                     }
-                    try db.run("INSERT INTO sync_state(folder_id,relative_path,file_hash,mtime,synced_at) VALUES(?,?,?,?,?) ON CONFLICT(folder_id,relative_path) DO UPDATE SET file_hash=excluded.file_hash,mtime=excluded.mtime,synced_at=excluded.synced_at", [folder.id, relative, hash, Int64(Date().timeIntervalSince1970 * 1000), timestamp()])
+                    try db.run("INSERT INTO sync_state(folder_id,relative_path,file_hash,mtime,synced_at) VALUES(?,?,?,?,?) ON CONFLICT(folder_id,relative_path) DO UPDATE SET file_hash=excluded.file_hash,mtime=excluded.mtime,synced_at=excluded.synced_at", [folder.id, relative, hash, mtime, timestamp()])
                 } catch is CancellationError { throw CancellationError() }
                 catch { failures.append("\(url.lastPathComponent)：\(error.localizedDescription)") }
             }

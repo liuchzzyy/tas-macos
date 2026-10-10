@@ -28,7 +28,10 @@ jobs:
       - name: Compatibility and recovery tests
         run: swift test -c release
       - name: Build native app and test installed resources
+        timeout-minutes: 8
         run: ./scripts/build-macos.sh
+      - name: Launch the native SwiftUI window
+        run: swift scripts/smoke-gui.swift "$PWD/dist/TAS.app/Contents/MacOS/TAS" "$PWD/dist"
       - name: Check archive
         run: unzip -t dist/TAS-1.0.0-${{ matrix.arch }}.zip
       - uses: actions/upload-artifact@v4
@@ -38,4 +41,6 @@ jobs:
             dist/TAS-1.0.0-*.zip
             dist/TAS-1.0.0-*.sha256
             dist/build-report-*.txt
+            dist/gui-launch-report.txt
+            dist/TAS-native-window.png
           if-no-files-found: error

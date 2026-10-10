@@ -78,6 +78,16 @@ public enum Crypto {
     }
     /// Streaming v1 envelope keeps large legacy files compatible without whole-file allocation.
     public static func encryptFile(_ input: URL, to output: URL, password: String, compressed: Bool) throws {
+        #if canImport(CryptoKit)
+        // Keep the legacy envelope while using Apple's accelerated AES for common files.
+        // The fixed cap bounds allocation; large inputs continue through the streaming path.
+        if let plain = try boundedData(input, limit: 8 * 1024 * 1024) {
+            try Task.checkCancellation()
+            let encrypted = try encrypt(compressed ? Gzip.compress(plain) : plain, password: password)
+            let destination = try Paths.privateFile(output); defer { try? destination.close() }
+            try destination.write(contentsOf: encrypted); try destination.synchronize(); return
+        }
+        #endif
         let source = try FileHandle(forReadingFrom: input); defer { try? source.close() }
         let destination = try Paths.privateFile(output); defer { try? destination.close() }
         let salt = try random(32); let iv = try random(12)
@@ -98,6 +108,14 @@ public enum Crypto {
     public static func decryptFile(_ input: URL, to output: URL, password: String) throws {
         let source = try FileHandle(forReadingFrom: input); defer { try? source.close() }
         let size = try source.seekToEnd(); try require(size >= 60, "加密文件不完整")
+        #if canImport(CryptoKit)
+        if size <= 8 * 1024 * 1024 + 60 {
+            try Task.checkCancellation()
+            let plain = try decrypt(Data(contentsOf: input), password: password)
+            let destination = try Paths.privateFile(output); defer { try? destination.close() }
+            try destination.write(contentsOf: plain); try destination.synchronize(); return
+        }
+        #endif
         try source.seek(toOffset: 0); let prefix = try source.read(upToCount: 44) ?? Data()
         try require(prefix.count == 44, "加密文件头不完整")
         try source.seek(toOffset: size - 16); let tag = try source.read(upToCount: 16) ?? Data()
@@ -116,6 +134,13 @@ public enum Crypto {
             }
             try destination.write(contentsOf: Data(cipher.finish())); try destination.synchronize()
         } catch { try? destination.close(); try? FileManager.default.removeItem(at: output); throw error }
+    }
+    private static func boundedData(_ url: URL, limit: Int) throws -> Data? {
+        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+        guard try file.seekToEnd() <= UInt64(limit) else { return nil }
+        try file.seek(toOffset: 0)
+        let data = try file.read(upToCount: limit + 1) ?? Data()
+        return data.count <= limit ? data : nil
     }
     public static func hashFile(_ url: URL) throws -> String {
         let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }

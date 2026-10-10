@@ -59,7 +59,7 @@ final class CoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: failed.path))
     }
     func testStreamingOutputMatchesOneShotDecoder() throws {
-        let plain = Data((0..<(1024 * 1024 + 29)).map { UInt8($0 % 251) })
+        let plain = Data((0..<(9 * 1024 * 1024 + 29)).map { UInt8($0 % 251) })
         let input = directory.appendingPathComponent("input"); try Paths.atomicWrite(plain, to: input)
         let encrypted = directory.appendingPathComponent("encrypted")
         try Crypto.encryptFile(input, to: encrypted, password: password, compressed: false)
@@ -153,4 +153,27 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(config["botToken"]); XCTAssertEqual(number(config["configVersion"]), 3)
         XCTAssertEqual(config["futureField"] as? String, "preserve-me")
     }
+    func testSyncUsesLegacyRelativePathsAndSourceModificationTimes() async throws {
+        try seedConfig(); let fake = FakeTelegram()
+        let vault = try Vault(directory: directory, password: password, transport: fake)
+        let folder = directory.appendingPathComponent("notes")
+        try Paths.privateDirectory(folder)
+        let source = folder.appendingPathComponent("note.txt")
+        try Paths.atomicWrite(Data("first version".utf8), to: source)
+        let modified = Date(timeIntervalSince1970: 1_700_000_000)
+        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: source.path)
+        try await vault.addFolder(folder)
+        let first = try await vault.sync(); XCTAssertNil(first.warning)
+        let files = try await vault.files(); XCTAssertEqual(files.map(\.filename), ["note.txt"])
+        let sent = fake.counter
+        _ = try await vault.sync(); XCTAssertEqual(fake.counter, sent)
+        let database = try Database(directory: directory)
+        let state = try database.rows("SELECT * FROM sync_state").first!
+        XCTAssertEqual(number(state["mtime"]), 1_700_000_000_000)
+        try Paths.atomicWrite(Data("second version".utf8), to: source)
+        _ = try await vault.sync()
+        let updated = try await vault.files(); XCTAssertEqual(updated.count, 1)
+        XCTAssertNotEqual(updated[0].hash, files[0].hash)
+    }
+
 }
