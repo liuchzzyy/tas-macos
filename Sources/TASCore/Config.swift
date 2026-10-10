@@ -45,7 +45,7 @@ final class Configuration {
         }
     }
     static func create(directory: URL, password: String, token: String, chatID: String, endpoint: String? = nil) throws {
-        try require(password.count >= 8, "加密密码至少需要 8 个字符")
+        try require(PasswordPolicy.isValid(password), "加密密码须至少 12 位，并包含大写、小写字母、数字和符号")
         try validate(id: "primary", token: token, chatID: chatID, endpoint: endpoint)
         try require(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("config.json").path) && !FileManager.default.fileExists(atPath: directory.appendingPathComponent("index.db").path), "此目录已有配置或索引，请解锁现有文件库")
         var bot: JSON = ["id": "primary", "chatId": chatID, "enabled": true, "encryptedBotToken": try Crypto.encrypt(Data(token.utf8), password: password).base64EncodedString(), "createdAt": timestamp()]

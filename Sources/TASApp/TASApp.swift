@@ -199,10 +199,22 @@ struct UnlockView: View {
                     TextField("自定义 Bot API 地址（可选）", text: $endpoint)
                 }
                 SecureField("加密密码", text: $password).onSubmit(submit)
-                if !model.configured { SecureField("再次输入密码", text: $confirmation) }
+                if !model.configured {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(PasswordPolicy.checks(password), id: \.0) { rule in
+                            Label(rule.0, systemImage: rule.1 ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(rule.1 ? Color.green : Color.secondary)
+                        }
+                    }.font(.caption).accessibilityElement(children: .combine)
+                    SecureField("再次输入密码", text: $confirmation)
+                    if !confirmation.isEmpty {
+                        Label(password == confirmation ? "两次密码一致" : "两次密码不一致", systemImage: password == confirmation ? "checkmark.circle.fill" : "circle")
+                            .font(.caption).foregroundStyle(password == confirmation ? Color.green : Color.secondary)
+                    }
+                }
                 Button(action: submit) {
                     HStack { Spacer(); if model.busy { ProgressView().controlSize(.small) }; Text(model.configured ? "解锁" : "创建文件库"); Spacer() }.padding(.vertical, 5)
-                }.buttonStyle(.borderedProminent).disabled(model.busy || password.isEmpty)
+                }.buttonStyle(.borderedProminent).disabled(model.busy || password.isEmpty || (!model.configured && (!PasswordPolicy.isValid(password) || password != confirmation)))
                 Divider()
                 Text("文件库目录").font(.caption).foregroundStyle(.secondary)
                 HStack { Text(model.directory.path).font(.caption).lineLimit(1).truncationMode(.middle); Spacer(); Button("更改…") { model.chooseDirectory() }.disabled(model.busy) }
@@ -211,6 +223,7 @@ struct UnlockView: View {
         }.padding(44).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
     }
     private func submit() {
+        if !model.configured && !PasswordPolicy.isValid(password) { model.notice = "密码尚未满足全部要求"; return }
         if !model.configured && password != confirmation { model.notice = "两次输入的密码不一致"; return }
         model.open(password: password, token: model.configured ? nil : token, chat: model.configured ? nil : chat, endpoint: endpoint.isEmpty ? nil : endpoint)
         password = ""; confirmation = ""; token = ""
@@ -342,6 +355,11 @@ struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var addingBot = false
     @State private var editingBot: BotInfo?
+    @State private var checkingUpdate = false
+    @State private var updateStatus: String?
+    @State private var latestRelease: ReleaseUpdate?
+    private var appVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版" }
+    private var gitHash: String { Bundle.main.object(forInfoDictionaryKey: "TASGitHash") as? String ?? "unknown" }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -371,12 +389,73 @@ struct SettingsView: View {
                                 Toggle("启用", isOn: Binding(get: { bot.enabled }, set: { enabled in model.run("更新机器人") { vault, _ in try await vault.updateBot(bot.id, enabled: enabled); return OperationResult("机器人已更新") } })).toggleStyle(.switch).fixedSize().disabled(model.busy)
                             }.padding(.vertical, 7)
                         }
-                        Text("停用机器人后，已存储的文件仍可下载。请保留仍被文件引用的机器人配置。").font(.caption).foregroundStyle(.secondary)
                     }.padding(12)
                 }
-                Text("TAS 1.0 · Swift + SwiftUI\n兼容 TAS v1–v3 配置和 WAS1 文件格式。密码仅在本次解锁会话中使用。\n请保留独立文件备份；Telegram 不提供持久性保证。").font(.caption).foregroundStyle(.secondary).lineSpacing(5)
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("软件更新").font(.headline)
+                            Spacer()
+                            Button("检查更新") { Task { await checkForUpdates() } }.disabled(checkingUpdate)
+                        }
+                        if checkingUpdate { ProgressView("正在检查 GitHub 最新 Release…").controlSize(.small) }
+                        if let updateStatus { Text(updateStatus).font(.callout).foregroundStyle(.secondary) }
+                        if let latestRelease {
+                            Link("查看 TAS \(latestRelease.version) Release", destination: latestRelease.releaseURL)
+                        }
+                        Link("在浏览器查看最新 Releases", destination: URL(string: "https://github.com/liuchzzyy/tas-macos/releases/latest")!)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                }
+                Text("TAS \(appVersion) · \(gitHash)").font(.caption).foregroundStyle(.secondary)
             }.padding(28)
         }.sheet(isPresented: $addingBot) { AddBotView() }.sheet(item: $editingBot) { bot in EndpointView(bot: bot) }
+    }
+    private func checkForUpdates() async {
+        guard !checkingUpdate else { return }
+        checkingUpdate = true; updateStatus = nil; latestRelease = nil
+        defer { checkingUpdate = false }
+        var cliError: String?
+        // A private GitHub repo returns 404 without authentication. Use the user's
+        // existing gh login if available, and fall back to the public API otherwise.
+        if let gh = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            do {
+                let data = try await Task.detached(priority: .userInitiated) { () throws -> Data in
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: gh)
+                    process.arguments = ["api", "repos/liuchzzyy/tas-macos/releases/latest"]
+                    process.environment = ProcessInfo.processInfo.environment.merging(["GH_HTTP_TIMEOUT": "15"]) { _, new in new }
+                    let output = Pipe(); process.standardOutput = output; process.standardError = FileHandle.nullDevice
+                    try process.run()
+                    let data = output.fileHandleForReading.readDataToEndOfFile()
+                    process.waitUntilExit()
+                    guard process.terminationStatus == 0 else { throw NSError(domain: "TAS.Update", code: 3) }
+                    return data
+                }.value
+                showRelease(try ReleaseUpdate(data: data))
+                return
+            } catch {
+                cliError = error.localizedDescription
+            }
+        }
+        do {
+            var request = URLRequest(url: URL(string: "https://api.github.com/repos/liuchzzyy/tas-macos/releases/latest")!)
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 15
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let response = response as? HTTPURLResponse else { throw NSError(domain: "TAS.Update", code: 2, userInfo: [NSLocalizedDescriptionKey: "无效的服务器响应"]) }
+            if response.statusCode == 404 {
+                updateStatus = "仓库为私有或尚未发布 Release：请确认 gh 已登录且拥有仓库权限，或在浏览器查看 Releases。"; return
+            }
+            guard response.statusCode == 200 else { throw NSError(domain: "TAS.Update", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "GitHub 返回 HTTP \(response.statusCode)"]) }
+            showRelease(try ReleaseUpdate(data: data))
+        } catch { updateStatus = "检查更新失败：\(cliError.map { "gh：\($0)；" } ?? "")\(error.localizedDescription)" }
+    }
+    private func showRelease(_ release: ReleaseUpdate) {
+        if release.isNewer(than: appVersion) {
+            updateStatus = "发现新版本 TAS \(release.version)（当前 \(appVersion)）"
+            latestRelease = release
+        } else { updateStatus = "已是最新版本（\(appVersion)）" }
     }
     private func rebuild() {
         let alert = NSAlert(); alert.messageText = "从远端恢复索引？"; alert.informativeText = "当前索引会先备份到文件库目录，再由最近一次远端备份替换。尚未进入备份的文件不会显示在恢复后的索引中。"; alert.addButton(withTitle: "备份并恢复"); alert.addButton(withTitle: "取消")

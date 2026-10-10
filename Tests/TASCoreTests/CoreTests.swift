@@ -39,6 +39,36 @@ final class CoreTests: XCTestCase {
         // Real v1 config is inexpensive to prepare and exercises legacy token loading.
         try Paths.atomicWrite(jsonData(["configVersion": 1, "passwordHash": fixture["hash"]!, "botToken": fixture["token"]!, "chatId": "-123456", "futureField": "preserve-me"]), to: (target ?? directory!).appendingPathComponent("config.json"))
     }
+    func testNewPasswordsRequireAllFourCharacterClasses() throws {
+        for invalid in ["123456789012", "lowercase123!", "UPPERCASE123!", "MixedCaseOnly!", "MixedCase1234", "Aa1!short"] {
+            XCTAssertFalse(PasswordPolicy.isValid(invalid), "unexpectedly accepted \(invalid)")
+            XCTAssertThrowsError(try Configuration.create(directory: directory, password: invalid, token: "123:token", chatID: "-1"))
+        }
+        let valid = "Long-Secret2026!"
+        XCTAssertTrue(PasswordPolicy.isValid(valid))
+        try Configuration.create(directory: directory, password: valid, token: "123:token", chatID: "-1")
+        XCTAssertNoThrow(try Configuration(directory: directory, password: valid))
+    }
+    func testExistingNumericPasswordStillUnlocks() throws {
+        let oldPassword = "12345678"
+        try Paths.atomicWrite(jsonData([
+            "configVersion": 1,
+            "passwordHash": try Crypto.passwordHash(oldPassword),
+            "botToken": "123:token",
+            "chatId": "-1"
+        ]), to: directory.appendingPathComponent("config.json"))
+        XCTAssertNoThrow(try Configuration(directory: directory, password: oldPassword))
+        XCTAssertFalse(PasswordPolicy.isValid(oldPassword))
+    }
+    func testLatestReleaseParsingAndVersionComparison() throws {
+        let payload = Data(#"{"tag_name":"v1.2.0","html_url":"https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.0","assets":[{"name":"TAS-1.2.0-arm64.dmg","browser_download_url":"https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.0/TAS-1.2.0-arm64.dmg"}]}"#.utf8)
+        let release = try ReleaseUpdate(data: payload)
+        XCTAssertTrue(release.isNewer(than: "1.1.9"))
+        XCTAssertFalse(release.isNewer(than: "1.2.0"))
+        XCTAssertFalse(release.isNewer(than: "1.3.0"))
+        XCTAssertEqual(release.downloadURL.lastPathComponent, "TAS-1.2.0-arm64.dmg")
+        XCTAssertThrowsError(try ReleaseUpdate(data: Data(#"{"tag_name":"oops","html_url":"https://evil.example"}"#.utf8)))
+    }
     func testNodePasswordHashesAndEnvelope() throws {
         XCTAssertEqual(try Crypto.passwordHash(password), fixture["hash"] as? String)
         XCTAssertTrue(try Crypto.verifyPassword(password, hash: string(fixture["legacyHash"])))

@@ -19,6 +19,10 @@ cp "$build_dir/TASDesktop" "$app/Contents/MacOS/TAS"
 cp "$build_dir/tas" "$app/Contents/Helpers/tas"
 strip -x "$app/Contents/MacOS/TAS" "$app/Contents/Helpers/tas"
 cp Resources/Info.plist "$app/Contents/Info.plist"
+# Embed the source revision in the signed app instead of relying on .git at runtime.
+source_hash="$(git rev-parse --short=7 HEAD)"
+if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then source_hash="${source_hash}-dirty"; fi
+/usr/libexec/PlistBuddy -c "Add :TASGitHash string $source_hash" "$app/Contents/Info.plist"
 cp LICENSE "$app/Contents/Resources/LICENSE"
 cp .build/checkouts/CryptoSwift/LICENSE "$app/Contents/Resources/CryptoSwift-LICENSE"
 for bundle in "$build_dir"/*.bundle; do
@@ -43,8 +47,8 @@ echo "Testing application startup"
 python3 scripts/check-process.py "$app/Contents/MacOS/TAS" --smoke-test
 mv "$build_dir/TAS_TASCore.bundle.hidden" "$build_dir/TAS_TASCore.bundle"
 trap - EXIT
-archive="$PWD/dist/TAS-1.0.0-arm64.dmg"
-rm -f "$archive" "$PWD/dist/TAS-1.0.0-arm64.zip" "$PWD/dist/TAS-1.0.0-arm64.zip.sha256"
+archive="$PWD/dist/TAS-1.0.1-arm64.dmg"
+rm -f "$archive" "$PWD/dist/TAS-1.0.0-arm64.dmg" "$PWD/dist/TAS-1.0.0-arm64.dmg.sha256"
 hdiutil create -volname TAS -srcfolder "$app" -ov -format UDZO "$archive"
 hdiutil verify "$archive"
 shasum -a 256 "$archive" > "$archive.sha256"

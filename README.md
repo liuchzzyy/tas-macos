@@ -6,13 +6,13 @@
 
 ## 获取与运行
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/latest) 下载最新版 Apple Silicon (arm64) DMG；当前版本是 [v1.0.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.0.0)，可直接下载 [TAS-1.0.0-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.0.0/TAS-1.0.0-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.0.0/TAS-1.0.0-arm64.dmg.sha256)）。仓库目前为私有仓库，下载需有访问权限。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/latest) 下载最新版 Apple Silicon (arm64) DMG；当前版本是 [v1.0.1](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.0.1)，可直接下载 [TAS-1.0.1-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.0.1/TAS-1.0.1-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.0.1/TAS-1.0.1-arm64.dmg.sha256)）。仓库目前为私有仓库，下载需有访问权限。
 
 打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 
 需要尚未发布的最新构建时，也可在 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 下载 `TAS-macOS-arm64` artifact；GitHub 会先将 artifact 打包为 ZIP，解压后才是 DMG。
 
-首次使用填写 Bot Token、Chat ID 和加密密码。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。
+首次使用填写 Bot Token、Chat ID 和加密密码。新文件库密码至少 12 位，并包含大小写字母、数字和符号；创建界面逐项提示，已有文件库仍可用原密码解锁。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。设置中的“检查更新”读取 GitHub 最新 Release；私有仓库需在本机安装 GitHub CLI 并完成 `gh auth login`，或使用浏览器打开 Releases。
 
 已有 TAS 用户可以直接选择原来的 `~/.tas` 目录并输入原密码。请先退出旧客户端，并备份整个数据目录；原生版使用进程锁防止同时写入，但旧版部分命令不遵守此锁。
 
@@ -79,7 +79,7 @@ tas sync start --watch
 
 ## 大小与性能
 
-每次 macOS CI 构建输出应用目录大小、ZIP 大小、架构和 CLI 启动测量，随 artifact 提供 `build-report-*.txt`。移除 Electron 的浏览器运行时能减少分发内容；具体体积以构建产物为准。
+每次 macOS CI 构建输出应用目录与 DMG 大小、架构和 CLI 启动测量，随 artifact 提供 `build-report-*.txt`。移除 Electron 的浏览器运行时能减少分发内容；具体体积以构建产物为准。
 
 Swift 原生界面有利于降低界面运行时开销，但不代表所有处理都会更快：网络速度仍受 Telegram 和网络限制；为了兼容旧格式，8 MiB 以内的文件使用 Apple CryptoKit 加速，大文件 AES-GCM 使用 CryptoSwift 流式处理，吞吐量需要单独实测，不能直接假定高于 Node/OpenSSL。
 
