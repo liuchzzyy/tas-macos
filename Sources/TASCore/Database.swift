@@ -37,16 +37,18 @@ final class Database {
         } catch { sqlite3_close(handle); handle = nil; throw error }
     }
     private static var schemaURL: URL? {
-        // SwiftPM's generated accessor assumes resources next to the executable.
-        // Installed app/CLI helpers share a standard Contents/Resources directory.
+        // Resolve installed resources by path before asking Foundation for Bundle.main.
+        // A CLI helper inside an .app is not itself the application's main executable.
         let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
-        let candidates = [Bundle.main.resourceURL, executable.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources")].compactMap { $0 }
+        let parent = executable.deletingLastPathComponent()
+        let candidates = [parent.deletingLastPathComponent().appendingPathComponent("Resources"), parent]
         for directory in candidates {
             for name in ["TAS_TASCore.bundle", "TAS_TASCore.resources"] {
                 let root = directory.appendingPathComponent(name)
-                if let url = Bundle(url: root)?.url(forResource: "schema", withExtension: "sql") { return url }
-                let direct = root.appendingPathComponent("schema.sql")
-                if FileManager.default.fileExists(atPath: direct.path) { return direct }
+                for path in ["schema.sql", "Contents/Resources/schema.sql"] {
+                    let file = root.appendingPathComponent(path)
+                    if FileManager.default.fileExists(atPath: file.path) { return file }
+                }
             }
         }
         return Bundle.module.url(forResource: "schema", withExtension: "sql")

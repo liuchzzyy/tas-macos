@@ -33,9 +33,9 @@ codesign --verify --deep --strict "$app"
 mv "$build_dir/TAS_TASCore.bundle" "$build_dir/TAS_TASCore.bundle.hidden"
 trap 'mv "$build_dir/TAS_TASCore.bundle.hidden" "$build_dir/TAS_TASCore.bundle"' EXIT
 echo "Testing installed resources"
-"$app/Contents/Helpers/tas" --self-test
+python3 scripts/check-process.py "$app/Contents/Helpers/tas" --self-test
 echo "Testing application startup"
-"$app/Contents/MacOS/TAS" --smoke-test
+python3 scripts/check-process.py "$app/Contents/MacOS/TAS" --smoke-test
 mv "$build_dir/TAS_TASCore.bundle.hidden" "$build_dir/TAS_TASCore.bundle"
 trap - EXIT
 arch="$(uname -m)"
