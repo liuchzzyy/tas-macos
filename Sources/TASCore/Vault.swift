@@ -330,6 +330,9 @@ public actor Vault {
         try begin(); defer { busy = false }
         let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         try require(values.isDirectory == true && values.isSymbolicLink != true, "请选择普通文件夹")
+        let root = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let vaultRoot = directory.resolvingSymlinksInPath().standardizedFileURL.path
+        try require(root != vaultRoot && !root.hasPrefix(vaultRoot + "/"), "不能将文件库数据目录作为同步源")
         try db.run("INSERT OR IGNORE INTO sync_folders(local_path) VALUES(?)", [url.standardizedFileURL.path])
     }
     public func removeFolder(_ id: Int64) throws { try begin(); defer { busy = false }; try db.run("DELETE FROM sync_folders WHERE id=?", [id]) }

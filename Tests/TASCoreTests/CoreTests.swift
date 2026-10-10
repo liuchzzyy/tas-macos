@@ -35,9 +35,9 @@ final class CoreTests: XCTestCase {
     }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: directory) }
     private func resource(_ name: String, _ ext: String) -> URL { Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Fixtures")! }
-    private func seedConfig() throws {
+    private func seedConfig(in target: URL? = nil) throws {
         // Real v1 config is inexpensive to prepare and exercises legacy token loading.
-        try Paths.atomicWrite(jsonData(["configVersion": 1, "passwordHash": fixture["hash"]!, "botToken": fixture["token"]!, "chatId": "-123456", "futureField": "preserve-me"]), to: directory.appendingPathComponent("config.json"))
+        try Paths.atomicWrite(jsonData(["configVersion": 1, "passwordHash": fixture["hash"]!, "botToken": fixture["token"]!, "chatId": "-123456", "futureField": "preserve-me"]), to: (target ?? directory!).appendingPathComponent("config.json"))
     }
     func testNodePasswordHashesAndEnvelope() throws {
         XCTAssertEqual(try Crypto.passwordHash(password), fixture["hash"] as? String)
@@ -154,10 +154,11 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(config["futureField"] as? String, "preserve-me")
     }
     func testSyncUsesLegacyRelativePathsAndSourceModificationTimes() async throws {
-        try seedConfig(); let fake = FakeTelegram()
-        let vault = try Vault(directory: directory, password: password, transport: fake)
-        let folder = directory.appendingPathComponent("notes")
-        try Paths.privateDirectory(folder)
+        let library = directory.appendingPathComponent("library")
+        try seedConfig(in: library); let fake = FakeTelegram()
+        let vault = try Vault(directory: library, password: password, transport: fake)
+        let folder = directory! // This parent contains the vault; its internal files must be excluded.
+        do { try await vault.addFolder(library); XCTFail("must exclude vault roots") } catch {}
         let source = folder.appendingPathComponent("note.txt")
         try Paths.atomicWrite(Data("first version".utf8), to: source)
         let modified = Date(timeIntervalSince1970: 1_700_000_000)
@@ -167,7 +168,7 @@ final class CoreTests: XCTestCase {
         let files = try await vault.files(); XCTAssertEqual(files.map(\.filename), ["note.txt"])
         let sent = fake.counter
         _ = try await vault.sync(); XCTAssertEqual(fake.counter, sent)
-        let database = try Database(directory: directory)
+        let database = try Database(directory: library)
         let state = try database.rows("SELECT * FROM sync_state").first!
         XCTAssertEqual(number(state["mtime"]), 1_700_000_000_000)
         try Paths.atomicWrite(Data("second version".utf8), to: source)

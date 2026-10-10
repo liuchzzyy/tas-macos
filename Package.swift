@@ -7,7 +7,7 @@ let package = Package(
     products: [
         .library(name: "TASCore", targets: ["TASCore"]),
         .executable(name: "tas", targets: ["tas"]),
-        .executable(name: "TAS", targets: ["TASApp"])
+        .executable(name: "TASDesktop", targets: ["TASApp"])
     ],
     dependencies: [.package(url: "https://github.com/krzyzanowskim/CryptoSwift.git", exact: "1.10.0")],
     targets: [
