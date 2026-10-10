@@ -83,4 +83,4 @@ tas sync start --watch
 
 Swift 原生界面有利于降低界面运行时开销，但不代表所有处理都会更快：网络速度仍受 Telegram 和网络限制；为了兼容旧格式，8 MiB 以内的文件使用 Apple CryptoKit 加速，大文件 AES-GCM 使用 CryptoSwift 流式处理，吞吐量需要单独实测，不能直接假定高于 Node/OpenSSL。
 
-源项目：[liuchzzyy/tas](https://github.com/liuchzzyy/tas)。MIT 许可与上游署名保留在 `LICENSE` 中。
+源项目：[ixchio/tas](https://github.com/ixchio/tas)。MIT 许可与上游署名保留在 `LICENSE` 中。
