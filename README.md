@@ -6,9 +6,11 @@
 
 ## 获取与运行
 
-在本仓库的 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 中打开最新成功的 **Native macOS** 构建，下载 Apple Silicon artifact：`TAS-macOS-arm64`。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/latest) 下载最新版 Apple Silicon (arm64) DMG；当前版本是 [v1.0.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.0.0)，可直接下载 [TAS-1.0.0-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.0.0/TAS-1.0.0-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.0.0/TAS-1.0.0-arm64.dmg.sha256)）。仓库目前为私有仓库，下载需有访问权限。
 
-先解压 GitHub artifact，再打开其中的 `TAS-1.0.0-arm64.dmg`，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
+打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
+
+需要尚未发布的最新构建时，也可在 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 下载 `TAS-macOS-arm64` artifact；GitHub 会先将 artifact 打包为 ZIP，解压后才是 DMG。
 
 首次使用填写 Bot Token、Chat ID 和加密密码。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。
 
