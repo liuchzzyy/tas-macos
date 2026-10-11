@@ -15,15 +15,23 @@ public struct PasswordPolicy {
 }
 
 public struct ReleaseUpdate: Sendable {
+    public let tag: String
     public let version: String
     public let releaseURL: URL
     public let downloadURL: URL
+    public let expectedSHA256: String
+    public let expectedSize: Int64
     private struct Payload: Decodable {
         let tag_name: String
         let html_url: URL
         let assets: [Asset]
     }
-    private struct Asset: Decodable { let name: String; let browser_download_url: URL }
+    private struct Asset: Decodable {
+        let name: String
+        let browser_download_url: URL
+        let digest: String?
+        let size: Int64?
+    }
     public init(data: Data) throws {
         let payload = try JSONDecoder().decode(Payload.self, from: data)
         let version = String(payload.tag_name.drop(while: { $0 == "v" }))
@@ -32,11 +40,17 @@ public struct ReleaseUpdate: Sendable {
               payload.html_url.path == "/liuchzzyy/tas-macos/releases/tag/\(payload.tag_name)",
               let asset = payload.assets.first(where: { $0.name == "TAS-\(version)-arm64.dmg" }),
               asset.browser_download_url.scheme == "https", asset.browser_download_url.host == "github.com",
-              asset.browser_download_url.path == "/liuchzzyy/tas-macos/releases/download/\(payload.tag_name)/\(asset.name)"
+              asset.browser_download_url.path == "/liuchzzyy/tas-macos/releases/download/\(payload.tag_name)/\(asset.name)",
+              let digest = asset.digest, digest.hasPrefix("sha256:"),
+              digest.count == 71, digest.dropFirst(7).allSatisfy({ $0.isASCII && $0.isHexDigit }),
+              let size = asset.size, size > 0
         else { throw NSError(domain: "TAS.Update", code: 1, userInfo: [NSLocalizedDescriptionKey: "最新 Release 缺少有效版本或 arm64 DMG 下载地址"]) }
+        tag = payload.tag_name
         self.version = version
         releaseURL = payload.html_url
         downloadURL = asset.browser_download_url
+        expectedSHA256 = String(digest.dropFirst(7)).lowercased()
+        expectedSize = size
     }
     private static func parts(_ version: String) -> [Int]? {
         let values = version.split(separator: ".", omittingEmptySubsequences: false)

@@ -7,7 +7,8 @@ let package = Package(
     products: [
         .library(name: "TASCore", targets: ["TASCore"]),
         .executable(name: "tas", targets: ["tas"]),
-        .executable(name: "TASDesktop", targets: ["TASApp"])
+        .executable(name: "TASDesktop", targets: ["TASApp"]),
+        .executable(name: "TASUpdater", targets: ["TASUpdater"])
     ],
     dependencies: [.package(url: "https://github.com/krzyzanowskim/CryptoSwift.git", exact: "1.10.0")],
     targets: [
@@ -20,6 +21,7 @@ let package = Package(
         ], resources: [.copy("schema.sql")]),
         .executableTarget(name: "tas", dependencies: ["TASCore"]),
         .executableTarget(name: "TASApp", dependencies: ["TASCore"]),
+        .executableTarget(name: "TASUpdater", dependencies: ["TASCore"]),
         .testTarget(name: "TASCoreTests", dependencies: ["TASCore"], resources: [.copy("Fixtures")])
     ],
     swiftLanguageModes: [.v5]

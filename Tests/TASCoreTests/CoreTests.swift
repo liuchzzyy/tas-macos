@@ -61,13 +61,30 @@ final class CoreTests: XCTestCase {
         XCTAssertFalse(PasswordPolicy.isValid(oldPassword))
     }
     func testLatestReleaseParsingAndVersionComparison() throws {
-        let payload = Data(#"{"tag_name":"v1.2.0","html_url":"https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.0","assets":[{"name":"TAS-1.2.0-arm64.dmg","browser_download_url":"https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.0/TAS-1.2.0-arm64.dmg"}]}"#.utf8)
+        let payload = Data(#"{"tag_name":"v1.2.0","html_url":"https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.0","assets":[{"name":"TAS-1.2.0-arm64.dmg","browser_download_url":"https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.0/TAS-1.2.0-arm64.dmg","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1234}]}"#.utf8)
         let release = try ReleaseUpdate(data: payload)
         XCTAssertTrue(release.isNewer(than: "1.1.9"))
         XCTAssertFalse(release.isNewer(than: "1.2.0"))
         XCTAssertFalse(release.isNewer(than: "1.3.0"))
         XCTAssertEqual(release.downloadURL.lastPathComponent, "TAS-1.2.0-arm64.dmg")
         XCTAssertThrowsError(try ReleaseUpdate(data: Data(#"{"tag_name":"oops","html_url":"https://evil.example"}"#.utf8)))
+    }
+    func testReleaseRequiresAuthenticatedDigestForAutomaticInstall() throws {
+        let payload = Data(#"{"tag_name":"v1.2.0","html_url":"https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.0","assets":[{"name":"TAS-1.2.0-arm64.dmg","browser_download_url":"https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.0/TAS-1.2.0-arm64.dmg","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1234}]}"#.utf8)
+        let release = try ReleaseUpdate(data: payload)
+        XCTAssertEqual(release.expectedSHA256, String(repeating: "a", count: 64))
+        XCTAssertEqual(release.expectedSize, 1234)
+        XCTAssertEqual(release.tag, "v1.2.0")
+        let missing = Data(#"{"tag_name":"v1.2.0","html_url":"https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.0","assets":[{"name":"TAS-1.2.0-arm64.dmg","browser_download_url":"https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.0/TAS-1.2.0-arm64.dmg"}]}"#.utf8)
+        XCTAssertThrowsError(try ReleaseUpdate(data: missing))
+        for invalid in ["sha256:1234", "sha256:\(String(repeating: "z", count: 64))"] {
+            let data = Data(String(decoding: payload, as: UTF8.self)
+                .replacingOccurrences(of: "sha256:\(String(repeating: "a", count: 64))", with: invalid).utf8)
+            XCTAssertThrowsError(try ReleaseUpdate(data: data))
+        }
+        let zeroSize = Data(String(decoding: payload, as: UTF8.self)
+            .replacingOccurrences(of: "\"size\":1234", with: "\"size\":0").utf8)
+        XCTAssertThrowsError(try ReleaseUpdate(data: zeroSize))
     }
     func testNodePasswordHashesAndEnvelope() throws {
         XCTAssertEqual(try Crypto.passwordHash(password), fixture["hash"] as? String)

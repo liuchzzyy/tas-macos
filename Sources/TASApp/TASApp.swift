@@ -3,6 +3,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import TASCore
+import CryptoKit
 
 @MainActor final class AppModel: ObservableObject {
     @Published var vault: Vault?
@@ -141,6 +142,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WindowGroup("TAS") {
             RootView().environmentObject(model).frame(minWidth: 960, minHeight: 650)
                 .tint(Color(red: 0.15, green: 0.48, blue: 0.40))
+                .onAppear {
+                    let report = UpdateInstaller.resultURL
+                    if let result = try? String(contentsOf: report, encoding: .utf8) {
+                        model.notice = result
+                        try? FileManager.default.removeItem(at: report)
+                    }
+                }
                 .alert("TAS", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) { Button("知道了") { model.notice = nil } } message: { Text(model.notice ?? "") }
         }
         .defaultSize(width: 1120, height: 760)
@@ -649,9 +657,17 @@ struct SyncView: View {
 }
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    private var isolatedUIPreview: Bool {
+        #if TAS_UI_PREVIEW
+        CommandLine.arguments.contains("--ui-preview")
+        #else
+        false
+        #endif
+    }
     @State private var addingBot = false
     @State private var editingBot: BotInfo?
     @State private var checkingUpdate = false
+    @State private var installingUpdate = false
     @State private var updateStatus: String?
     @State private var latestRelease: ReleaseUpdate?
     private var appVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版" }
@@ -702,15 +718,19 @@ struct SettingsView: View {
                         HStack {
                             Text("软件更新").font(LibraryStyle.sectionTitle)
                             Spacer()
-                            Button("检查更新") { Task { await checkForUpdates() } }.disabled(checkingUpdate || model.vault == nil)
+                            Button("检查更新") { Task { await checkForUpdates() } }.disabled(checkingUpdate || installingUpdate || isolatedUIPreview)
                         }
                         Divider()
                         if checkingUpdate { ProgressView("正在检查 GitHub 最新 Release…").controlSize(.small) }
+                        if installingUpdate { ProgressView("正在下载与校验更新…").controlSize(.small) }
                         if let updateStatus { Text(updateStatus).font(LibraryStyle.body).foregroundStyle(.secondary) }
                         if let latestRelease {
+                            Button("更新到 TAS \(latestRelease.version)…") { Task { await installUpdate(latestRelease) } }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(installingUpdate || checkingUpdate || isolatedUIPreview || model.busy || model.historyFile != nil)
                             Link("查看 TAS \(latestRelease.version) Release", destination: latestRelease.releaseURL)
                         }
-                        if model.vault == nil { Text("界面预览不访问网络或真实文件库").font(LibraryStyle.helper).foregroundStyle(.secondary) }
+                        if isolatedUIPreview { Text("界面预览不访问网络或真实文件库").font(LibraryStyle.helper).foregroundStyle(.secondary) }
                         else { Link("在浏览器查看最新 Releases", destination: URL(string: "https://github.com/liuchzzyy/tas-macos/releases/latest")!) }
                     }
                 }
@@ -739,32 +759,9 @@ struct SettingsView: View {
             .sheet(isPresented: $addingBot) { AddBotView() }.sheet(item: $editingBot) { bot in EndpointView(bot: bot) }
     }
     private func checkForUpdates() async {
-        guard !checkingUpdate else { return }
+        guard !checkingUpdate, !isolatedUIPreview else { return }
         checkingUpdate = true; updateStatus = nil; latestRelease = nil
         defer { checkingUpdate = false }
-        var cliError: String?
-        // A private GitHub repo returns 404 without authentication. Use the user's
-        // existing gh login if available, and fall back to the public API otherwise.
-        if let gh = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            do {
-                let data = try await Task.detached(priority: .userInitiated) { () throws -> Data in
-                    let process = Process()
-                    process.executableURL = URL(fileURLWithPath: gh)
-                    process.arguments = ["api", "repos/liuchzzyy/tas-macos/releases/latest"]
-                    process.environment = ProcessInfo.processInfo.environment.merging(["GH_HTTP_TIMEOUT": "15"]) { _, new in new }
-                    let output = Pipe(); process.standardOutput = output; process.standardError = FileHandle.nullDevice
-                    try process.run()
-                    let data = output.fileHandleForReading.readDataToEndOfFile()
-                    process.waitUntilExit()
-                    guard process.terminationStatus == 0 else { throw NSError(domain: "TAS.Update", code: 3) }
-                    return data
-                }.value
-                showRelease(try ReleaseUpdate(data: data))
-                return
-            } catch {
-                cliError = error.localizedDescription
-            }
-        }
         do {
             var request = URLRequest(url: URL(string: "https://api.github.com/repos/liuchzzyy/tas-macos/releases/latest")!)
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -772,18 +769,55 @@ struct SettingsView: View {
             request.timeoutInterval = 15
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let response = response as? HTTPURLResponse else { throw NSError(domain: "TAS.Update", code: 2, userInfo: [NSLocalizedDescriptionKey: "无效的服务器响应"]) }
-            if response.statusCode == 404 {
-                updateStatus = "仓库为私有或尚未发布 Release：请确认 gh 已登录且拥有仓库权限，或在浏览器查看 Releases。"; return
-            }
+            if response.statusCode == 404 { updateStatus = "尚未发布 Release。"; return }
             guard response.statusCode == 200 else { throw NSError(domain: "TAS.Update", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "GitHub 返回 HTTP \(response.statusCode)"]) }
             showRelease(try ReleaseUpdate(data: data))
-        } catch { updateStatus = "检查更新失败：\(cliError.map { "gh：\($0)；" } ?? "")\(error.localizedDescription)" }
+        } catch { updateStatus = "检查更新失败：\(error.localizedDescription)" }
     }
     private func showRelease(_ release: ReleaseUpdate) {
         if release.isNewer(than: appVersion) {
             updateStatus = "发现新版本 TAS \(release.version)（当前 \(appVersion)）"
             latestRelease = release
         } else { updateStatus = "已是最新版本（\(appVersion)）" }
+    }
+    private func installUpdate(_ release: ReleaseUpdate) async {
+        guard !model.busy, model.historyFile == nil, !installingUpdate, !isolatedUIPreview else { return }
+        let alert = NSAlert()
+        alert.messageText = "更新到 TAS \(release.version)？"
+        alert.informativeText = "将从 GitHub 下载并校验安装包，备份旧应用后重启 TAS。不会修改文件库数据。请先保存正在进行的工作。"
+        alert.addButton(withTitle: "确认更新")
+        alert.addButton(withTitle: "取消")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        installingUpdate = true
+        updateStatus = nil
+        do {
+            let currentApp = Bundle.main.bundleURL
+            guard currentApp.standardizedFileURL.path == "/Applications/TAS.app" else {
+                throw UpdateInstaller.Failure("自动更新仅支持 /Applications/TAS.app；其他位置请手动安装 DMG。")
+            }
+            let helper = currentApp.appendingPathComponent("Contents/Helpers/TASUpdater")
+            guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+                throw UpdateInstaller.Failure("当前版本缺少更新组件；请从 Release 手动安装一次新版。")
+            }
+            let prepared = try await Task.detached(priority: .userInitiated) {
+                try await UpdateInstaller.prepare(release, helper: helper)
+            }.value
+            let process = Process()
+            process.executableURL = prepared.helper
+            let report = UpdateInstaller.resultURL
+            try FileManager.default.createDirectory(at: report.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: report)
+            process.arguments = [prepared.app.path, currentApp.path, release.version,
+                                 "\(ProcessInfo.processInfo.processIdentifier)", report.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            model.lock()
+            NSApp.terminate(nil)
+        } catch {
+            updateStatus = "更新失败：\(error.localizedDescription)"
+            installingUpdate = false
+        }
     }
     private func rebuild() {
         let alert = NSAlert(); alert.messageText = "从远端恢复索引？"; alert.informativeText = "当前索引会先备份到文件库目录，再由最近一次远端备份替换。尚未进入备份的文件不会显示在恢复后的索引中。"; alert.addButton(withTitle: "备份并恢复"); alert.addButton(withTitle: "取消")
