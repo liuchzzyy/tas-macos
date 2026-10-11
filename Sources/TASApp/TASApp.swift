@@ -3,7 +3,6 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import TASCore
-import CryptoKit
 
 @MainActor final class AppModel: ObservableObject {
     @Published var vault: Vault?
@@ -173,11 +172,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @State private var section: String? = "overview"
+    init() {
+        #if TAS_UI_PREVIEW
+        if CommandLine.arguments.contains("--ui-preview-versions") {
+            _section = State(initialValue: "versions")
+        }
+        #endif
+    }
     // Compile only into the isolated UI-preview binary. Release builds never
     // bypass the vault unlock screen or expose a preview launch option.
     private var isolatedUIPreview: Bool {
         #if TAS_UI_PREVIEW
-        CommandLine.arguments.contains("--ui-preview")
+        CommandLine.arguments.contains("--ui-preview") || CommandLine.arguments.contains("--ui-preview-versions")
         #else
         false
         #endif
@@ -199,56 +205,43 @@ struct RootView: View {
                                 Text("TAS").font(.title2.bold())
                                 Text("加密文件库").font(.caption).foregroundStyle(.secondary)
                             }
-                        }.padding(.horizontal, 19).padding(.top, 29).padding(.bottom, 32)
+                        }.padding(.horizontal, 19).padding(.top, 22).padding(.bottom, 24)
                         VStack(alignment: .leading, spacing: 5) {
                             TASSectionLabel(title: "工作台")
                             sidebarItem("概览", icon: "square.grid.2x2", id: "overview")
-                            TASSectionLabel(title: "文件管理").padding(.top, 20)
+                            TASSectionLabel(title: "文件管理").padding(.top, 14)
                             sidebarItem("所有文件", icon: "folder", id: "files")
                             sidebarItem("已删除", icon: "trash", id: "deleted")
-                            TASSectionLabel(title: "工作流程").padding(.top, 20)
+                            TASSectionLabel(title: "工作流程").padding(.top, 14)
                             sidebarItem("传输任务", icon: "arrow.up.arrow.down", id: "transfers")
                             sidebarItem("文件夹同步", icon: "arrow.triangle.2.circlepath", id: "sync")
-                            sidebarItem("版本管理", icon: "clock.arrow.circlepath", id: "versions")
+                            TASSectionLabel(title: "应用").padding(.top, 14)
+                            sidebarItem("版本管理", icon: "arrow.down.app", id: "versions")
                             sidebarItem("设置", icon: "slider.horizontal.3", id: "settings")
                         }.padding(.horizontal, 12)
                         .padding(.bottom, 10)
                         Spacer(minLength: 16)
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack(alignment: .center, spacing: 10) {
-                                Image(systemName: model.vault == nil ? "eye" : "lock.open.fill")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(TASDesign.accent)
-                                    .frame(width: 30, height: 30)
-                                    .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 8))
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(model.vault == nil ? "界面预览 · 未连接" : "文件库已解锁")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                    Text(model.vault == nil ? "不读取真实文件库" : "\(model.activeFiles.count) 个文件")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .lineLimit(1)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(11)
-                            Rectangle().fill(TASDesign.border).frame(height: 1)
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(model.vault == nil ? "界面预览 · 未连接" : "文件库已解锁")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.primary)
+                                Text(model.vault == nil ? "不读取真实文件库" : "\(model.activeFiles.count) 个文件")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }.lineLimit(1)
+                            Spacer(minLength: 0)
                             Button { model.lock() } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "lock").frame(width: 16)
-                                    Text("锁定文件库")
-                                    Spacer(minLength: 0)
-                                }
-                                .font(.caption)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
+                                Image(systemName: model.vault == nil ? "lock" : "lock.open.fill")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(TASDesign.accent)
+                                    .frame(width: 34, height: 34)
+                                    .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 9))
                             }
                             .buttonStyle(.plain)
                             .disabled(!model.canOperate || model.historyFile != nil)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
+                            .help(model.vault == nil ? "未连接文件库" : "锁定文件库")
+                            .accessibilityLabel(model.vault == nil ? "文件库未连接" : "锁定文件库")
                         }
+                        .padding(12)
                         .background(TASDesign.surface, in: RoundedRectangle(cornerRadius: 11))
                         .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TASDesign.border))
                         .padding(.horizontal, 13)
@@ -285,7 +278,7 @@ struct RootView: View {
                             case "versions": VersionManagementView()
                             case "transfers": TransfersView()
                             case "sync": SyncView()
-                            case "settings": SettingsView()
+                            case "settings": SettingsView(openVersionManagement: { section = "versions" })
                             case "deleted": LibraryView(showDeleted: true).id("deleted")
                             default: LibraryView().id("files")
                             }
@@ -657,26 +650,16 @@ struct SyncView: View {
 }
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
-    private var isolatedUIPreview: Bool {
-        #if TAS_UI_PREVIEW
-        CommandLine.arguments.contains("--ui-preview")
-        #else
-        false
-        #endif
-    }
+    let openVersionManagement: () -> Void
     @State private var addingBot = false
     @State private var editingBot: BotInfo?
-    @State private var checkingUpdate = false
-    @State private var installingUpdate = false
-    @State private var updateStatus: String?
-    @State private var latestRelease: ReleaseUpdate?
     private var appVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版" }
     private var gitHash: String { Bundle.main.object(forInfoDictionaryKey: "TASGitHash") as? String ?? "unknown" }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text("设置").font(LibraryStyle.pageTitle)
-                Text("管理文件库、连接与软件更新。")
+                Text("管理文件库与连接。软件更新在版本管理中查看。")
                     .font(LibraryStyle.body).foregroundStyle(.secondary)
                 LibrarySurface {
                     VStack(alignment: .leading, spacing: 13) {
@@ -714,24 +697,15 @@ struct SettingsView: View {
                     }
                 }
                 LibrarySurface {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("软件更新").font(LibraryStyle.sectionTitle)
-                            Spacer()
-                            Button("检查更新") { Task { await checkForUpdates() } }.disabled(checkingUpdate || installingUpdate || isolatedUIPreview)
+                    HStack(spacing: 12) {
+                        Image(systemName: "arrow.down.app").foregroundStyle(TASDesign.accent)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("软件版本").font(LibraryStyle.sectionTitle)
+                            Text("查看 GUI 与 CLI 当前版本、检查更新及阅读发布说明。")
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
                         }
-                        Divider()
-                        if checkingUpdate { ProgressView("正在检查 GitHub 最新 Release…").controlSize(.small) }
-                        if installingUpdate { ProgressView("正在下载与校验更新…").controlSize(.small) }
-                        if let updateStatus { Text(updateStatus).font(LibraryStyle.body).foregroundStyle(.secondary) }
-                        if let latestRelease {
-                            Button("更新到 TAS \(latestRelease.version)…") { Task { await installUpdate(latestRelease) } }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(installingUpdate || checkingUpdate || isolatedUIPreview || model.busy || model.historyFile != nil)
-                            Link("查看 TAS \(latestRelease.version) Release", destination: latestRelease.releaseURL)
-                        }
-                        if isolatedUIPreview { Text("界面预览不访问网络或真实文件库").font(LibraryStyle.helper).foregroundStyle(.secondary) }
-                        else { Link("在浏览器查看最新 Releases", destination: URL(string: "https://github.com/liuchzzyy/tas-macos/releases/latest")!) }
+                        Spacer(minLength: 8)
+                        Button("前往版本管理", systemImage: "arrow.right") { openVersionManagement() }
                     }
                 }
                 LibrarySurface {
@@ -757,67 +731,6 @@ struct SettingsView: View {
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
         }.background(LibraryStyle.canvas)
             .sheet(isPresented: $addingBot) { AddBotView() }.sheet(item: $editingBot) { bot in EndpointView(bot: bot) }
-    }
-    private func checkForUpdates() async {
-        guard !checkingUpdate, !isolatedUIPreview else { return }
-        checkingUpdate = true; updateStatus = nil; latestRelease = nil
-        defer { checkingUpdate = false }
-        do {
-            var request = URLRequest(url: URL(string: "https://api.github.com/repos/liuchzzyy/tas-macos/releases/latest")!)
-            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            request.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
-            request.timeoutInterval = 15
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let response = response as? HTTPURLResponse else { throw NSError(domain: "TAS.Update", code: 2, userInfo: [NSLocalizedDescriptionKey: "无效的服务器响应"]) }
-            if response.statusCode == 404 { updateStatus = "尚未发布 Release。"; return }
-            guard response.statusCode == 200 else { throw NSError(domain: "TAS.Update", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: "GitHub 返回 HTTP \(response.statusCode)"]) }
-            showRelease(try ReleaseUpdate(data: data))
-        } catch { updateStatus = "检查更新失败：\(error.localizedDescription)" }
-    }
-    private func showRelease(_ release: ReleaseUpdate) {
-        if release.isNewer(than: appVersion) {
-            updateStatus = "发现新版本 TAS \(release.version)（当前 \(appVersion)）"
-            latestRelease = release
-        } else { updateStatus = "已是最新版本（\(appVersion)）" }
-    }
-    private func installUpdate(_ release: ReleaseUpdate) async {
-        guard !model.busy, model.historyFile == nil, !installingUpdate, !isolatedUIPreview else { return }
-        let alert = NSAlert()
-        alert.messageText = "更新到 TAS \(release.version)？"
-        alert.informativeText = "将从 GitHub 下载并校验安装包，备份旧应用后重启 TAS。不会修改文件库数据。请先保存正在进行的工作。"
-        alert.addButton(withTitle: "确认更新")
-        alert.addButton(withTitle: "取消")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        installingUpdate = true
-        updateStatus = nil
-        do {
-            let currentApp = Bundle.main.bundleURL
-            guard currentApp.standardizedFileURL.path == "/Applications/TAS.app" else {
-                throw UpdateInstaller.Failure("自动更新仅支持 /Applications/TAS.app；其他位置请手动安装 DMG。")
-            }
-            let helper = currentApp.appendingPathComponent("Contents/Helpers/TASUpdater")
-            guard FileManager.default.isExecutableFile(atPath: helper.path) else {
-                throw UpdateInstaller.Failure("当前版本缺少更新组件；请从 Release 手动安装一次新版。")
-            }
-            let prepared = try await Task.detached(priority: .userInitiated) {
-                try await UpdateInstaller.prepare(release, helper: helper)
-            }.value
-            let process = Process()
-            process.executableURL = prepared.helper
-            let report = UpdateInstaller.resultURL
-            try FileManager.default.createDirectory(at: report.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? FileManager.default.removeItem(at: report)
-            process.arguments = [prepared.app.path, currentApp.path, release.version,
-                                 "\(ProcessInfo.processInfo.processIdentifier)", report.path]
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-            model.lock()
-            NSApp.terminate(nil)
-        } catch {
-            updateStatus = "更新失败：\(error.localizedDescription)"
-            installingUpdate = false
-        }
     }
     private func rebuild() {
         let alert = NSAlert(); alert.messageText = "从远端恢复索引？"; alert.informativeText = "当前索引会先备份到文件库目录，再由最近一次远端备份替换。尚未进入备份的文件不会显示在恢复后的索引中。"; alert.addButton(withTitle: "备份并恢复"); alert.addButton(withTitle: "取消")

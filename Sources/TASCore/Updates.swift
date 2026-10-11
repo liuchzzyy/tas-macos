@@ -14,6 +14,41 @@ public struct PasswordPolicy {
     public static func isValid(_ password: String) -> Bool { checks(password).allSatisfy(\.1) }
 }
 
+/// The embedded CLI is a separate executable and may not have the GUI's version.
+public struct SoftwareVersions {
+    public let gui: String
+    public let cli: String?
+
+    public init(gui: String, cliOutput: String?) {
+        self.gui = gui
+        guard let cliOutput, cliOutput.hasPrefix("tas "), cliOutput.hasSuffix(" (Swift)") else {
+            cli = nil
+            return
+        }
+        let candidate = String(cliOutput.dropFirst(4).dropLast(8))
+        cli = ReleaseUpdate.isValidVersion(candidate) ? candidate : nil
+    }
+
+    public func guiNeedsUpdate(to latest: String) -> Bool {
+        ReleaseUpdate.isVersion(latest, newerThan: gui)
+    }
+
+    public func cliNeedsUpdate(to latest: String) -> Bool {
+        guard let cli else { return false }
+        return ReleaseUpdate.isVersion(latest, newerThan: cli)
+    }
+
+    public func canInstall(release latest: String) -> Bool {
+        guard ReleaseUpdate.isValidVersion(gui), cli != nil else { return false }
+        return !isAhead(of: latest) && (guiNeedsUpdate(to: latest) || cliNeedsUpdate(to: latest))
+    }
+
+    public func isAhead(of latest: String) -> Bool {
+        ReleaseUpdate.isVersion(gui, newerThan: latest) ||
+        (cli.map { ReleaseUpdate.isVersion($0, newerThan: latest) } ?? false)
+    }
+}
+
 public struct ReleaseUpdate: Sendable {
     public let tag: String
     public let version: String
@@ -52,6 +87,7 @@ public struct ReleaseUpdate: Sendable {
         expectedSHA256 = String(digest.dropFirst(7)).lowercased()
         expectedSize = size
     }
+    public static func isValidVersion(_ version: String) -> Bool { parts(version) != nil }
     private static func parts(_ version: String) -> [Int]? {
         let values = version.split(separator: ".", omittingEmptySubsequences: false)
         guard values.count == 3 else { return nil }
@@ -62,6 +98,9 @@ public struct ReleaseUpdate: Sendable {
         return numbers.count == 3 ? numbers : nil
     }
     public func isNewer(than installed: String) -> Bool {
+        Self.isVersion(version, newerThan: installed)
+    }
+    public static func isVersion(_ version: String, newerThan installed: String) -> Bool {
         guard let current = Self.parts(installed), let latest = Self.parts(version) else { return false }
         return latest.lexicographicallyPrecedes(current) == false && latest != current
     }

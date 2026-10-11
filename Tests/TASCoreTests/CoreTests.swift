@@ -86,6 +86,46 @@ final class CoreTests: XCTestCase {
             .replacingOccurrences(of: "\"size\":1234", with: "\"size\":0").utf8)
         XCTAssertThrowsError(try ReleaseUpdate(data: zeroSize))
     }
+    func testDesktopAndCLIReleaseVersionsAreComparedIndependently() {
+        let versions = SoftwareVersions(gui: "1.1.3", cliOutput: "tas 1.1.2 (Swift)")
+        XCTAssertEqual(versions.cli, "1.1.2")
+        XCTAssertFalse(versions.guiNeedsUpdate(to: "1.1.3"))
+        XCTAssertTrue(versions.cliNeedsUpdate(to: "1.1.3"))
+        XCTAssertEqual(SoftwareVersions(gui: "1.1.3", cliOutput: "unexpected").cli, nil)
+        XCTAssertEqual(SoftwareVersions(gui: "1.1.3", cliOutput: "tas banana (Swift)").cli, nil)
+        XCTAssertEqual(SoftwareVersions(gui: "1.1.3", cliOutput: "tas 1..3 (Swift)").cli, nil)
+        XCTAssertTrue(SoftwareVersions(gui: "1.1.4", cliOutput: "tas 1.1.4 (Swift)").isAhead(of: "1.1.3"))
+        XCTAssertFalse(versions.isAhead(of: "1.1.3"))
+        XCTAssertFalse(SoftwareVersions(gui: "1.1.4", cliOutput: "tas 1.1.2 (Swift)").canInstall(release: "1.1.3"))
+        XCTAssertTrue(versions.canInstall(release: "1.1.3"))
+        XCTAssertFalse(SoftwareVersions(gui: "开发版", cliOutput: "tas 1.1.2 (Swift)").canInstall(release: "1.1.3"))
+        XCTAssertFalse(SoftwareVersions(gui: "1.1.2", cliOutput: nil).canInstall(release: "1.1.3"))
+    }
+    func testEmbeddedCLIVersionProbeTerminatesUnresponsiveExecutable() throws {
+        let script = directory.appendingPathComponent("stall-cli")
+        try "#!/bin/sh\ntrap '' TERM\nwhile :; do :; done\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let start = Date()
+        XCTAssertNil(EmbeddedCLIVersionProbe.read(from: script, timeout: 0.2))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2)
+    }
+    func testEmbeddedCLIVersionProbeDoesNotBlockOnInheritedOutput() throws {
+        let script = directory.appendingPathComponent("fork-cli")
+        try "#!/bin/sh\nsleep 2 &\nexec printf 'tas 1.1.3 (Swift)\\n'\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let start = Date()
+        let version = EmbeddedCLIVersionProbe.read(from: script, timeout: 0.5)
+        XCTAssertTrue(version == nil || version == "tas 1.1.3 (Swift)")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1.5)
+    }
+    func testEmbeddedCLIVersionProbeRejectsUnboundedOutput() throws {
+        let script = directory.appendingPathComponent("flood-cli")
+        try "#!/bin/sh\nwhile :; do printf 'tas 1.1.3 (Swift)'; done\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        let start = Date()
+        XCTAssertNil(EmbeddedCLIVersionProbe.read(from: script, timeout: 0.5))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1.5)
+    }
     func testNodePasswordHashesAndEnvelope() throws {
         XCTAssertEqual(try Crypto.passwordHash(password), fixture["hash"] as? String)
         XCTAssertTrue(try Crypto.verifyPassword(password, hash: string(fixture["legacyHash"])))

@@ -2,17 +2,17 @@
 
 用 **Swift + SwiftUI** 重写的 TAS（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套文件处理代码；运行和构建均不需要 npm、Node.js、Electron、WebView 或 Rust。
 
-当前 v1.1.3 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
+当前 v1.1.4 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
 
 ## 获取与运行
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.3) 下载 [TAS-1.1.3-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.3/TAS-1.1.3-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.3/TAS-1.1.3-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.4) 下载 [TAS-1.1.4-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.4/TAS-1.1.4-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.4/TAS-1.1.4-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
 
 打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 
 需要尚未发布的开发构建时，也可在 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 下载 `TAS-macOS-arm64` artifact；GitHub 会先将 artifact 打包为 ZIP，解压后才是 DMG。
 
-首次使用填写 Bot Token、Chat ID 和加密密码。新文件库密码至少 12 位，并包含大小写字母、数字和符号；创建界面逐项提示，已有文件库仍可用原密码解锁。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。设置中的“检查更新”读取 GitHub 最新 Release；发现新版本后可确认安装，无须 GitHub CLI。自动安装仅支持位于 `/Applications/TAS.app` 且目录可写的应用，否则使用 Releases 手动安装。更新前会校验 Release 的 SHA-256 与应用签名，退出旧程序后备份旧 App 并重启；不会由更新程序修改文件库数据。
+首次使用填写 Bot Token、Chat ID 和加密密码。新文件库密码至少 12 位，并包含大小写字母、数字和符号；创建界面逐项提示，已有文件库仍可用原密码解锁。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。侧栏“版本管理”分别显示 GUI 与应用包内 CLI 的当前版本及 GitHub 最新 Release，可检查更新并确认安装，无须 GitHub CLI；设置页保留前往该页面的入口。自动安装仅支持位于 `/Applications/TAS.app` 且目录可写的应用，否则使用 Releases 手动安装。更新前会校验 Release 的 SHA-256 与应用签名，退出旧程序后备份旧 App 并重启；不会由更新程序修改文件库数据。
 
 已有 TAS 用户可以直接选择原来的 `~/.tas` 目录并输入原密码。请先退出旧客户端，并备份整个数据目录；原生版使用进程锁防止同时写入，但旧版部分命令不遵守此锁。
 
@@ -57,7 +57,7 @@ tas verify --all-versions --deep
 
 升级前应退出旧客户端并独立备份整个数据目录。历史功能涉及新的索引格式，**升级后的文件库不要再交给旧客户端写入**。旧索引中仍存在的文件可以迁移为初始版本，但此前已经因覆盖丢失索引的版本无法凭空找回。历史记录必须随加密远端索引备份；若远端索引备份失败，应保留本地数据库并重试 `tas index backup`，不能把本地成功误认为异地备份完成。当前远端索引仍有单条消息大小限制，不会通过静默丢弃历史来缩小索引。
 
-GUI 可从“版本管理”选文件打开版本历史；在“所有文件”或“已删除”中选中文件后，也可从工具栏、右键菜单或“文件库”菜单打开“版本历史…”或“上传新版本…”。“已删除”侧栏保留被删除文件及其历史；恢复会追加新版本，永久清除另行确认。同名上传／拖入会提示保存为新版本或改用其他逻辑路径。v1.1.1 增加浅色概览与侧栏导航；v1.1.2 参考 EasyCLIProxyAPI 的浅色卡片层级，调整概览与侧栏底部状态卡。语言/主题图标仍为不可交互占位。
+GUI 的侧栏“版本管理”现在用于 **GUI 与内置 CLI 软件版本**；文件版本历史则在“所有文件”或“已删除”中选中文件后，通过工具栏、右键菜单或“文件库”菜单打开“版本历史…”或“上传新版本…”。“已删除”侧栏保留被删除文件及其历史；恢复会追加新版本，永久清除另行确认。同名上传／拖入会提示保存为新版本或改用其他逻辑路径。v1.1.1 增加浅色概览与侧栏导航；v1.1.2 参考 EasyCLIProxyAPI 的浅色卡片层级，调整概览与侧栏底部状态卡。语言/主题图标仍为不可交互占位。
 
 `status --json` 的 `originalBytes` 是活动文件当前版本的原始大小合计；`storedBytes` 是全部保留版本引用的去重内容对象存储大小；`historyBytes` 是其中未被任何活动当前版本引用的部分（包含已删除文件）。两种存储量均不含分块头和索引消息，恢复复用内容不会重复计数。
 

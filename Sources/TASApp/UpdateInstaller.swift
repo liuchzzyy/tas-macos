@@ -51,6 +51,10 @@ enum UpdateInstaller {
             throw Failure("下载的应用标识或版本不符")
         }
         try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path], error: "下载的应用签名校验失败")
+        let stagedCLI = staged.appendingPathComponent("Contents/Helpers/tas")
+        guard SoftwareVersions(gui: release.version, cliOutput: EmbeddedCLIVersionProbe.read(from: stagedCLI)).cli == release.version else {
+            throw Failure("下载的 CLI 版本与 Release 不符")
+        }
         let stagedHelper = directory.appendingPathComponent("TASUpdater")
         try fm.copyItem(at: helper, to: stagedHelper)
         handedOff = true
