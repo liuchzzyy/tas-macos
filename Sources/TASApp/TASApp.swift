@@ -74,28 +74,78 @@ import TASCore
     }
     func cancel() { task?.cancel() }
     func upload(_ urls: [URL]) {
-        guard canOperate, historyFile == nil, !urls.isEmpty else { return }
-        presentingDialog = true
-        let requests = prepareUploads(urls)
-        presentingDialog = false
-        guard let requests else { return }
-        run("准备上传") { vault, progress in
-            var warnings: [String] = []
-            for request in requests {
+        guard canOperate, historyFile == nil, !urls.isEmpty, let session = vault else { return }
+        busy = true; notice = nil; progress = TransferProgress("正在检查上传内容")
+        task = Task {
+            let collector = Task.detached(priority: .userInitiated) { try UploadPlan.collect(urls) }
+            do {
+                let candidates = try await withTaskCancellationHandler {
+                    try await collector.value
+                } onCancel: { collector.cancel() }
                 try Task.checkCancellation()
-                let result = try await vault.upload(request.url, name: request.name, replace: request.replace, message: request.message, progress: progress)
-                if let warning = result.warning { warnings.append(warning) }
+                guard vault === session else { busy = false; task = nil; return }
+                busy = false; task = nil
+                guard !candidates.isEmpty else {
+                    notice = "没有可上传的文件。文件夹内隐藏项会跳过，空文件夹不单独保存。"
+                    progress = TransferProgress("没有可上传的文件"); return
+                }
+                presentingDialog = true
+                defer { presentingDialog = false }
+                let summary = NSAlert()
+                summary.messageText = "上传 \(candidates.count) 个文件？"
+                summary.informativeText = candidates.prefix(5).map(\.name).joined(separator: "\n")
+                    + (candidates.count > 5 ? "\n…" : "")
+                    + "\n\n文件夹保留顶层目录与子目录；跳过目录内隐藏项，不保存空文件夹。不添加持续同步任务。"
+                summary.addButton(withTitle: "继续"); summary.addButton(withTitle: "取消")
+                guard summary.runModal() == .alertFirstButtonReturn,
+                      let requests = prepareUploads(candidates) else { progress = TransferProgress("已取消上传"); return }
+                presentingDialog = false
+                run("准备上传") { vault, progress in
+                    var warnings: [String] = []
+                    for (index, request) in requests.enumerated() {
+                        try Task.checkCancellation()
+                        progress(TransferProgress("上传 \(index + 1)/\(requests.count) · \(request.name)"))
+                        let result = try await vault.upload(request.url, name: request.name, replace: request.replace, message: request.message, progress: progress)
+                        if let warning = result.warning { warnings.append(warning) }
+                    }
+                    return OperationResult("已处理 \(requests.count) 个文件", warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))
+                }
+            } catch {
+                busy = false; task = nil
+                if error is CancellationError { progress = TransferProgress("已取消上传检查") }
+                else { notice = error.localizedDescription; progress = TransferProgress("上传检查未通过，未开始上传") }
             }
-            return OperationResult("已上传 \(requests.count) 个文件", warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))
         }
     }
-    func chooseUpload() {
+    func chooseUpload(folders: Bool = false) {
         guard canOperate, historyFile == nil else { return }
         presentingDialog = true
-        let panel = NSOpenPanel(); panel.allowsMultipleSelection = true; panel.canChooseDirectories = false; panel.prompt = "上传"
+        let panel = NSOpenPanel(); panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = folders; panel.canChooseFiles = !folders
+        panel.prompt = folders ? "选择文件夹" : "选择文件"
+        panel.message = folders ? "一次性上传，保留文件夹名称和层级；不添加自动同步。" : "选择要上传的文件。"
         let response = panel.runModal()
         presentingDialog = false
         if response == .OK { upload(panel.urls) }
+    }
+    func acceptUploadDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard canOperate, historyFile == nil else { return false }
+        let session = vault
+        Task {
+            var urls: [URL] = []
+            for provider in providers {
+                let url: URL? = await withCheckedContinuation { continuation in
+                    provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                        if let data = item as? Data { continuation.resume(returning: URL(dataRepresentation: data, relativeTo: nil)) }
+                        else { continuation.resume(returning: item as? URL) }
+                    }
+                }
+                guard let url else { notice = "无法读取拖入的文件；未开始上传，请通过选择器重试。"; return }
+                urls.append(url)
+            }
+            if vault === session { upload(urls) }
+        }
+        return true
     }
     func download(_ file: StoredFile, version: Int? = nil) {
         guard canOperate, files.contains(where: { $0.id == file.id }) else { return }
@@ -153,9 +203,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         .defaultSize(width: 1120, height: 760)
         .windowToolbarStyle(.unified)
         .commands {
-            CommandGroup(replacing: .newItem) { Button("上传文件…") { model.chooseUpload() }.keyboardShortcut("u").disabled(!model.canOperate || model.historyFile != nil) }
+            CommandGroup(replacing: .newItem) {}
             CommandMenu("文件库") {
-                Button("上传新版本…") { if let file = model.selection { model.chooseNewVersion(file) } }.disabled(!model.canUploadVersion)
                 Button("版本历史…") { if let file = model.selection { model.showHistory(file) } }.keyboardShortcut("h", modifiers: [.command, .shift]).disabled(!model.canUseSelection)
                 Button("恢复自动同步…") { if let file = model.selection { model.resumeFileSync(file) } }.disabled(!model.canResumeSync)
                 Divider()
@@ -197,30 +246,32 @@ struct RootView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 12) {
                             Image(systemName: "shippingbox.fill")
-                                .font(.system(size: 23, weight: .semibold))
+                                .font(.system(size: 29, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 42, height: 42)
+                                .frame(width: 50, height: 50)
                                 .background(TASDesign.accent, in: RoundedRectangle(cornerRadius: 12))
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("TAS").font(.title2.bold())
+                                Text("TAS").font(.system(size: 30, weight: .bold))
                                 Text("加密文件库").font(.caption).foregroundStyle(.secondary)
                             }
-                        }.padding(.horizontal, 19).padding(.top, 22).padding(.bottom, 24)
-                        VStack(alignment: .leading, spacing: 5) {
+                        }.padding(.horizontal, 18).padding(.top, 15).padding(.bottom, 17)
+                        ScrollView {
+                        VStack(alignment: .leading, spacing: 3) {
                             TASSectionLabel(title: "工作台")
                             sidebarItem("概览", icon: "square.grid.2x2", id: "overview")
-                            TASSectionLabel(title: "文件管理").padding(.top, 14)
+                            TASSectionLabel(title: "文件管理").padding(.top, 8)
                             sidebarItem("所有文件", icon: "folder", id: "files")
                             sidebarItem("已删除", icon: "trash", id: "deleted")
-                            TASSectionLabel(title: "工作流程").padding(.top, 14)
+                            TASSectionLabel(title: "工作流程").padding(.top, 8)
                             sidebarItem("传输任务", icon: "arrow.up.arrow.down", id: "transfers")
                             sidebarItem("文件夹同步", icon: "arrow.triangle.2.circlepath", id: "sync")
-                            TASSectionLabel(title: "应用").padding(.top, 14)
+                            TASSectionLabel(title: "应用").padding(.top, 8)
                             sidebarItem("版本管理", icon: "arrow.down.app", id: "versions")
                             sidebarItem("设置", icon: "slider.horizontal.3", id: "settings")
                         }.padding(.horizontal, 12)
-                        .padding(.bottom, 10)
-                        Spacer(minLength: 16)
+                        .padding(.bottom, 8)
+                        }.scrollIndicators(.hidden)
+                        Spacer(minLength: 8)
                         HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(model.vault == nil ? "界面预览 · 未连接" : "文件库已解锁")
@@ -265,7 +316,7 @@ struct RootView: View {
                         .foregroundStyle(.secondary)
                         .help("语言和主题切换预留位置，当前不提供切换")
                         .accessibilityElement(children: .combine)
-                        .padding(.horizontal, 17).padding(.top, 10).padding(.bottom, 14)
+                        .padding(.horizontal, 15).padding(.top, 8).padding(.bottom, 10)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(TASDesign.sidebar)
@@ -278,7 +329,7 @@ struct RootView: View {
                             case "versions": VersionManagementView()
                             case "transfers": TransfersView()
                             case "sync": SyncView()
-                            case "settings": SettingsView(openVersionManagement: { section = "versions" })
+                            case "settings": SettingsView()
                             case "deleted": LibraryView(showDeleted: true).id("deleted")
                             default: LibraryView().id("files")
                             }
@@ -320,7 +371,7 @@ struct RootView: View {
                     .padding(.leading, 10)
                 Spacer(minLength: 0)
             }
-            .frame(height: 42)
+            .frame(height: 34)
             .background(selected ? TASDesign.surface : Color.clear, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? TASDesign.border : Color.clear))
         }
@@ -388,7 +439,6 @@ struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     var showDeleted = false
     @State private var search = ""
-    @State private var targeted = false
     @State private var tagging: StoredFile?
     @State private var tag = ""
     @State private var removeTag = false
@@ -399,14 +449,10 @@ struct LibraryView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(showDeleted ? "已删除" : "所有文件").font(LibraryStyle.pageTitle)
-                    Text(showDeleted ? "选择文件并从版本历史中恢复。" : "上传、查找和取回你的文件。")
+                    Text(showDeleted ? "选择文件并从版本历史中恢复。" : "按文件夹层级查找、管理和取回文件。")
                         .font(LibraryStyle.body).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if !showDeleted {
-                    Button { model.chooseUpload() } label: { Label("上传文件", systemImage: "plus") }
-                        .buttonStyle(.borderedProminent).controlSize(.large).disabled(!model.canOperate)
-                }
             }
             LibrarySurface {
                 HStack(spacing: 0) {
@@ -434,9 +480,6 @@ struct LibraryView: View {
                             Spacer(minLength: 12)
                             Button { model.download(selection) } label: { Label("下载", systemImage: "arrow.down.to.line") }.disabled(!model.canOperate)
                             Button { model.showHistory(selection) } label: { Label(showDeleted ? "查看并恢复…" : "版本历史", systemImage: "clock.arrow.circlepath") }.disabled(!model.canUseSelection)
-                            if !showDeleted {
-                                Button { model.chooseNewVersion(selection) } label: { Label("上传新版本", systemImage: "doc.badge.plus") }.disabled(!model.canUploadVersion)
-                            }
                             Menu {
                                 if !showDeleted {
                                     Button("编辑标签…") { tagging = selection; model.presentingDialog = true }
@@ -448,7 +491,7 @@ struct LibraryView: View {
                         }
                         Divider()
                     } else {
-                        Text(model.vault == nil ? "预览模式下不读取文件或提供操作" : (showDeleted ? "选择文件查看历史并恢复" : "选择文件以下载、查看历史或上传新版本"))
+                        Text(model.vault == nil ? "预览模式下不读取文件或提供操作" : (showDeleted ? "选择文件查看历史并恢复" : "选择文件以下载、查看历史或管理标签"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary)
                     }
                     if model.vault == nil {
@@ -464,62 +507,18 @@ struct LibraryView: View {
                                 .font(.system(size: 36, weight: .light)).foregroundStyle(.secondary)
                             Text(search.isEmpty ? (showDeleted ? "没有已删除的文件" : "还没有文件") : "没有找到文件")
                                 .font(.system(size: 19, weight: .medium))
-                            Text(search.isEmpty ? (showDeleted ? "删除的文件会在这里保留历史，以便恢复。" : "点击“上传文件”或将文件拖到窗口中。") : "试试其他文件名或标签。")
+                            Text(search.isEmpty ? (showDeleted ? "删除的文件会在这里保留历史，以便恢复。" : "请到“文件夹同步”上传文件或文件夹。") : "试试其他文件名或标签。")
                                 .font(LibraryStyle.body).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 40)
                     } else {
-                        Table(filtered, selection: $model.selectedFileID) {
-                            TableColumn("文件名") { file in
-                                HStack(spacing: 9) {
-                                    Image(systemName: file.deleted ? "trash" : "doc").foregroundStyle(.tint)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(file.filename).lineLimit(1).truncationMode(.middle).help(file.filename)
-                                            .accessibilityLabel(file.filename)
-                                        if !file.tags.isEmpty { Text(file.tags.joined(separator: " · ")).font(LibraryStyle.helper).foregroundStyle(.secondary).lineLimit(1) }
-                                        if file.syncPaused { Label("自动同步已暂停", systemImage: "pause.circle").font(LibraryStyle.helper).foregroundStyle(.orange) }
-                                    }
-                                }
-                            }.width(min: 180, ideal: 290)
-                            TableColumn("版本") { Text("v\($0.versionNumber) · 共 \($0.versionCount)").monospacedDigit() }.width(95)
-                            TableColumn("大小") { Text(bytes($0.originalSize)).monospacedDigit() }.width(95)
-                            TableColumn("更新时间") { Text(String($0.updatedAt.prefix(16)).replacingOccurrences(of: "T", with: " ")).foregroundStyle(.secondary) }.width(140)
-                        }.contextMenu(forSelectionType: StoredFile.ID.self) { ids in
-                            if ids.count == 1, let id = ids.first, let file = filtered.first(where: { $0.id == id }) {
-                                Button("下载…") { model.download(file) }
-                                Button(showDeleted ? "查看历史并恢复…" : "版本历史…") { model.showHistory(file) }
-                                if !file.deleted {
-                                    Button("上传新版本…") { model.chooseNewVersion(file) }
-                                    Button("编辑标签…") { tagging = file; model.presentingDialog = true }
-                                    Button("恢复自动同步…") { model.resumeFileSync(file) }.disabled(!file.syncPaused)
-                                }
-                                Divider()
-                                Button(file.deleted ? "永久清除…" : "删除并保留历史…", role: .destructive) { model.deleteFile(file, permanently: file.deleted) }
-                            }
-                        }.disabled(!model.canOperate)
+                        FileHierarchyView(files: filtered, search: search) { file in
+                            tagging = file; model.presentingDialog = true
+                        }
                     }
                 }
             }
         }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(TASDesign.canvas)
-        .overlay { if targeted { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8])).padding(10).allowsHitTesting(false) } }
-        .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { providers in
-            guard model.canOperate, model.historyFile == nil, !showDeleted else { return false }
-            let session = model.vault
-            Task {
-                var urls: [URL] = []
-                for provider in providers {
-                    let url: URL? = await withCheckedContinuation { continuation in
-                        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                            if let data = item as? Data { continuation.resume(returning: URL(dataRepresentation: data, relativeTo: nil)) }
-                            else { continuation.resume(returning: item as? URL) }
-                        }
-                    }
-                    if let url { urls.append(url) }
-                }
-                if model.vault === session, !urls.isEmpty { model.upload(urls) }
-            }
-            return true
-        }
         .onChange(of: filtered.map(\.id)) { _, ids in if let id = model.selectedFileID, !ids.contains(id) { model.selectedFileID = nil } }
         .onDisappear { model.selectedFileID = nil }
         .sheet(item: $tagging, onDismiss: { model.presentingDialog = false }) { target in
@@ -598,17 +597,21 @@ struct TransfersView: View {
 }
 struct SyncView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var targeted = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("文件夹同步").font(LibraryStyle.pageTitle)
-                Text("保持本地文件夹与加密文件库同步。").font(LibraryStyle.body).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("文件夹同步").font(LibraryStyle.pageTitle)
+                    Text("统一上传文件，或持续同步本地文件夹。").font(LibraryStyle.body).foregroundStyle(.secondary)
+                }
+                UploadCenterView()
                 LibrarySurface {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack {
-                            Text("同步目录").font(LibraryStyle.sectionTitle)
+                            Text("持续同步目录").font(LibraryStyle.sectionTitle)
                             Spacer()
-                            Button("添加目录…") { model.addFolder() }.disabled(!model.canOperate)
+                            Button("添加同步目录…") { model.addFolder() }.disabled(!model.canOperate)
                             Button("立即同步") { model.run("同步文件夹") { vault, progress in try await vault.sync(progress: progress) } }
                                 .buttonStyle(.borderedProminent).disabled(!model.canOperate || model.folders.isEmpty)
                         }
@@ -628,38 +631,38 @@ struct SyncView: View {
                 }
                 LibrarySurface {
                     VStack(alignment: .leading, spacing: 13) {
-                        Text("同步选项").font(LibraryStyle.sectionTitle)
-                        Toggle("应用打开时，每 30 秒检查一次变化", isOn: $model.autoSync).disabled(model.folders.isEmpty)
+                        HStack {
+                            Text("同步选项").font(LibraryStyle.sectionTitle)
+                            Spacer()
+                            Button("恢复全部文件…") { model.restoreAll() }.disabled(!model.canOperate)
+                                .help("选择目标目录，恢复文件库中的全部文件")
+                        }
+                        Toggle("应用打开时，每 30 秒检查一次变化", isOn: $model.autoSync).disabled(!model.canOperate || model.folders.isEmpty)
                         Text("新增文件按相对路径上传；修改会创建新版本。本地删除不会删除远端文件。路径冲突会停止本轮同步。历史恢复后，该文件的自动同步会暂停，需在文件列表中手动恢复。")
                             .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                LibrarySurface {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("在其他 Mac 上取回文件").font(LibraryStyle.sectionTitle)
-                            Text("选择目标目录，恢复文件库中的全部文件。").font(LibraryStyle.helper).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("恢复全部文件…") { model.restoreAll() }.disabled(!model.canOperate)
-                    }
-                }
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
         }.background(LibraryStyle.canvas)
+        .overlay {
+            if targeted {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(TASDesign.accent, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                    .padding(10).allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { model.acceptUploadDrop($0) }
     }
 }
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
-    let openVersionManagement: () -> Void
     @State private var addingBot = false
     @State private var editingBot: BotInfo?
-    private var appVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版" }
-    private var gitHash: String { Bundle.main.object(forInfoDictionaryKey: "TASGitHash") as? String ?? "unknown" }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text("设置").font(LibraryStyle.pageTitle)
-                Text("管理文件库与连接。软件更新在版本管理中查看。")
+                Text("管理文件库、连接与恢复。")
                     .font(LibraryStyle.body).foregroundStyle(.secondary)
                 LibrarySurface {
                     VStack(alignment: .leading, spacing: 13) {
@@ -697,18 +700,6 @@ struct SettingsView: View {
                     }
                 }
                 LibrarySurface {
-                    HStack(spacing: 12) {
-                        Image(systemName: "arrow.down.app").foregroundStyle(TASDesign.accent)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("软件版本").font(LibraryStyle.sectionTitle)
-                            Text("查看 GUI 与 CLI 当前版本、检查更新及阅读发布说明。")
-                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 8)
-                        Button("前往版本管理", systemImage: "arrow.right") { openVersionManagement() }
-                    }
-                }
-                LibrarySurface {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("恢复与校验").font(LibraryStyle.sectionTitle)
                         Text("以下操作可能需要较长时间；恢复索引会替换当前索引，请先确认备份状态。")
@@ -727,7 +718,6 @@ struct SettingsView: View {
                         }
                     }
                 }
-                Text("TAS \(appVersion) · \(gitHash)").font(LibraryStyle.helper).foregroundStyle(.secondary)
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
         }.background(LibraryStyle.canvas)
             .sheet(isPresented: $addingBot) { AddBotView() }.sheet(item: $editingBot) { bot in EndpointView(bot: bot) }

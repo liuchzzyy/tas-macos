@@ -41,7 +41,7 @@ func run() throws {
     }
     guard let menu else { throw SmokeFailure(description: "FAIL: native menu bar unavailable") }
     let items = descendants(menu)
-    for title in ["上传新版本…", "版本历史…", "恢复自动同步…"] {
+    for title in ["版本历史…", "恢复自动同步…"] {
         guard let item = items.first(where: { (attribute($0, kAXTitleAttribute) as? String) == title }) else {
             let titles = items.compactMap { attribute($0, kAXTitleAttribute) as? String }
             throw SmokeFailure(description: "FAIL: missing selected-file action ‘\(title)’; observed menu titles: \(titles)")

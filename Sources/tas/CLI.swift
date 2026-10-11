@@ -19,7 +19,7 @@ struct Arguments {
 }
 @main struct CLI {
     static let help = """
-    TAS 1.1.4 — 原生 Swift Telegram 文件库
+    TAS 1.2.0 — 原生 Swift Telegram 文件库
     用法：tas <命令> [选项]
 
       init                       创建文件库，交互输入 Token、Chat ID 和密码
@@ -89,7 +89,7 @@ struct Arguments {
         var args = Arguments(values: Array(CommandLine.arguments.dropFirst()))
         if args.flag("--self-test") { print(try Diagnostics.selfTest()); return }
         if args.flag("--help") || args.values.isEmpty { print(help); return }
-        if args.values == ["--version"] { print("tas 1.1.4 (Swift)"); return }
+        if args.values == ["--version"] { print("tas 1.2.0 (Swift)"); return }
         let directory = try args.option("--data-dir").map { URL(fileURLWithPath: $0, isDirectory: true) } ?? Paths.dataDirectory
         let passwordFile = try args.option("--password-file"); let json = args.flag("--json")
         let command = try args.pop("缺少命令")

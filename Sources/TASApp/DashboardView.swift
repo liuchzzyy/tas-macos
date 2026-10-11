@@ -20,12 +20,6 @@ struct DashboardView: View {
                             .font(LibraryStyle.body).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button { model.chooseUpload() } label: {
-                        Label("上传文件", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(!model.canOperate || model.historyFile != nil)
                 }
 
                 HStack(spacing: 9) {

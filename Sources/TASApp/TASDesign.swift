@@ -18,7 +18,7 @@ struct TASSectionLabel: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 13)
-            .padding(.bottom, 6)
+            .padding(.bottom, 3)
             .accessibilityAddTraits(.isHeader)
     }
 }

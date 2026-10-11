@@ -18,11 +18,12 @@ func versionedFilename(_ name: String, version: Int) -> String {
 
 @MainActor extension AppModel {
     // Resolve the entire batch before starting; Cancel never partially uploads a batch.
-    func prepareUploads(_ urls: [URL]) -> [UploadRequest]? {
+    func prepareUploads(_ candidates: [UploadCandidate]) -> [UploadRequest]? {
         var names = Set(files.map(\.filename))
         var requests: [UploadRequest] = []
-        for url in urls {
-            var name = url.lastPathComponent
+        for candidate in candidates {
+            let url = candidate.url
+            var name = candidate.name
             var replace = false
             var message: String?
             while names.contains(name) {

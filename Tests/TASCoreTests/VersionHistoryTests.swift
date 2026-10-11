@@ -38,6 +38,34 @@ final class VersionHistoryTests: XCTestCase {
         let url = root.appendingPathComponent("source.txt")
         try Paths.atomicWrite(Data(text.utf8), to: url); return url
     }
+    func testFolderUploadRoundTripRetainsHierarchyAndHistory() async throws {
+        let fake = FakeTelegram()
+        let vault = try Vault(directory: directory, password: password, transport: fake)
+        let rootFolder = root.appendingPathComponent("实验记录")
+        try Paths.privateDirectory(rootFolder.appendingPathComponent("第一天"))
+        let input = rootFolder.appendingPathComponent("第一天/结果.txt")
+        try Paths.atomicWrite(Data("first".utf8), to: input)
+        try Paths.atomicWrite(Data("overview".utf8), to: rootFolder.appendingPathComponent("说明.txt"))
+        let plan = try UploadPlan.collect([rootFolder])
+        XCTAssertEqual(plan.count, 2)
+        for item in plan { _ = try await vault.upload(item.url, name: item.name) }
+        let files = try await vault.files()
+        let rows = LibraryTree.visibleRows(LibraryTree.build(files), expanded: [], expandAll: true)
+        XCTAssertEqual(Set(rows.compactMap { $0.node.file?.filename }), ["实验记录/第一天/结果.txt", "实验记录/说明.txt"])
+        XCTAssertEqual(rows.filter { $0.node.isFolder }.map { $0.node.path }, ["实验记录", "实验记录/第一天"])
+        let selected = try XCTUnwrap(files.first { $0.filename.hasSuffix("结果.txt") })
+        try Paths.atomicWrite(Data("second".utf8), to: input)
+        _ = try await vault.upload(input, name: selected.filename, replace: true)
+        let history = try await vault.history(selected.id)
+        XCTAssertEqual(history.map(\.number), [2, 1])
+        let output = root.appendingPathComponent("download.txt")
+        try await vault.download(selected.id, to: output, version: 1)
+        XCTAssertEqual(try Data(contentsOf: output), Data("first".utf8))
+        XCTAssertEqual(try Data(contentsOf: input), Data("second".utf8))
+        let folders = try await vault.folders()
+        XCTAssertTrue(folders.isEmpty, "One-time folder upload must not register continuous sync")
+    }
+
     func testHistoryDownloadRestoreAndCurrentHashSkip() async throws {
         let fake = FakeTelegram()
         let vault = try Vault(directory: directory, password: password, transport: fake)

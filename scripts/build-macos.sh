@@ -48,7 +48,7 @@ echo "Testing application startup"
 python3 scripts/check-process.py "$app/Contents/MacOS/TAS" --smoke-test
 mv "$build_dir/TAS_TASCore.bundle.hidden" "$build_dir/TAS_TASCore.bundle"
 trap - EXIT
-archive="$PWD/dist/TAS-1.1.4-arm64.dmg"
+archive="$PWD/dist/TAS-1.2.0-arm64.dmg"
 rm -f "$archive"
 hdiutil create -volname TAS -srcfolder "$app" -ov -format UDZO "$archive"
 hdiutil verify "$archive"
