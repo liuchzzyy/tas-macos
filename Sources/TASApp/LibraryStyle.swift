@@ -4,7 +4,7 @@ import SwiftUI
 /// Pale, consistent surfaces used by the file-management pages.
 enum LibraryStyle {
     static let canvas = TASDesign.canvas
-    static let surface = TASDesign.canvas
+    static let surface = TASDesign.surface
     static let hairline = TASDesign.border
     static let pageTitle = Font.system(size: 29, weight: .bold)
     static let sectionTitle = Font.system(size: 20, weight: .semibold)

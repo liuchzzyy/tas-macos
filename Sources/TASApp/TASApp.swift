@@ -206,13 +206,45 @@ struct RootView: View {
                         }.padding(.horizontal, 12)
                         .padding(.bottom, 10)
                         Spacer(minLength: 16)
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label(model.vault == nil ? "界面预览 · 未连接" : "文件库已解锁", systemImage: model.vault == nil ? "eye" : "lock.open")
-                                .foregroundStyle(TASDesign.accent)
-                            Text(model.vault == nil ? "不读取真实文件库" : "\(model.activeFiles.count) 个文件").foregroundStyle(.secondary)
-                            Button("锁定文件库", systemImage: "lock") { model.lock() }
-                                .buttonStyle(.borderless).disabled(!model.canOperate || model.historyFile != nil)
-                        }.font(.caption).padding(.horizontal, 22).padding(.vertical, 10)
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(alignment: .center, spacing: 10) {
+                                Image(systemName: model.vault == nil ? "eye" : "lock.open.fill")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(TASDesign.accent)
+                                    .frame(width: 30, height: 30)
+                                    .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 8))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(model.vault == nil ? "界面预览 · 未连接" : "文件库已解锁")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(model.vault == nil ? "不读取真实文件库" : "\(model.activeFiles.count) 个文件")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(11)
+                            Rectangle().fill(TASDesign.border).frame(height: 1)
+                            Button { model.lock() } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "lock").frame(width: 16)
+                                    Text("锁定文件库")
+                                    Spacer(minLength: 0)
+                                }
+                                .font(.caption)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!model.canOperate || model.historyFile != nil)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                        }
+                        .background(TASDesign.surface, in: RoundedRectangle(cornerRadius: 11))
+                        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TASDesign.border))
+                        .padding(.horizontal, 13)
+                        .padding(.bottom, 13)
                         Divider().padding(.horizontal, 18)
                         HStack(spacing: 10) {
                             Label("简体中文", systemImage: "globe")
@@ -221,7 +253,7 @@ struct RootView: View {
                             Spacer(minLength: 2)
                             HStack(spacing: 5) {
                                 Image(systemName: "sun.max.fill").foregroundStyle(TASDesign.accent)
-                                    .padding(5).background(TASDesign.canvas, in: RoundedRectangle(cornerRadius: 6))
+                                    .padding(5).background(TASDesign.surface, in: RoundedRectangle(cornerRadius: 6))
                                 Image(systemName: "moon").padding(5)
                                 Image(systemName: "display").padding(5)
                             }
@@ -241,7 +273,7 @@ struct RootView: View {
                     VStack(spacing: 0) {
                         Group {
                             switch section {
-                            case "overview": DashboardView()
+                            case "overview": DashboardView(openSection: { section = $0 })
                             case "versions": VersionManagementView()
                             case "transfers": TransfersView()
                             case "sync": SyncView()
@@ -276,14 +308,20 @@ struct RootView: View {
     private func sidebarItem(_ title: String, icon: String, id: String) -> some View {
         let selected = section == id
         return Button { section = id } label: {
-            Label(title, systemImage: icon)
-                .font(.callout.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? TASDesign.accent : Color.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 13)
-                .frame(height: 42)
-                .background(selected ? TASDesign.canvas : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? TASDesign.border : Color.clear))
+            HStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(selected ? TASDesign.accent : .clear)
+                    .frame(width: 3, height: 22)
+                    .padding(.leading, 5)
+                Label(title, systemImage: icon)
+                    .font(.callout.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? TASDesign.accent : Color.primary)
+                    .padding(.leading, 10)
+                Spacer(minLength: 0)
+            }
+            .frame(height: 42)
+            .background(selected ? TASDesign.surface : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? TASDesign.border : Color.clear))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
