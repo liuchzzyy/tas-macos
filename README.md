@@ -2,15 +2,15 @@
 
 用 **Swift + SwiftUI** 重写的 TAS（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套文件处理代码；运行和构建均不需要 npm、Node.js、Electron、WebView 或 Rust。
 
-支持 macOS 13 及以上，仅构建 Apple Silicon (arm64) 的 DMG 安装包。
+当前 v1.1.1 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求仅适用于 v1.1.1 及其源码构建。
 
 ## 获取与运行
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/latest) 下载最新版 Apple Silicon (arm64) DMG；v1.1.0 发布后可直接下载 [TAS-1.1.0-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.0/TAS-1.1.0-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.0/TAS-1.1.0-arm64.dmg.sha256)）。仓库目前为私有仓库，下载需有访问权限。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.1) 下载 [TAS-1.1.1-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.1/TAS-1.1.1-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.1/TAS-1.1.1-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库目前为私有仓库，下载需有访问权限。
 
 打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 
-需要尚未发布的最新构建时，也可在 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 下载 `TAS-macOS-arm64` artifact；GitHub 会先将 artifact 打包为 ZIP，解压后才是 DMG。
+需要尚未发布的开发构建时，也可在 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 下载 `TAS-macOS-arm64` artifact；GitHub 会先将 artifact 打包为 ZIP，解压后才是 DMG。
 
 首次使用填写 Bot Token、Chat ID 和加密密码。新文件库密码至少 12 位，并包含大小写字母、数字和符号；创建界面逐项提示，已有文件库仍可用原密码解锁。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。设置中的“检查更新”读取 GitHub 最新 Release；私有仓库需在本机安装 GitHub CLI 并完成 `gh auth login`，或使用浏览器打开 Releases。
 
@@ -57,7 +57,7 @@ tas verify --all-versions --deep
 
 升级前应退出旧客户端并独立备份整个数据目录。历史功能涉及新的索引格式，**升级后的文件库不要再交给旧客户端写入**。旧索引中仍存在的文件可以迁移为初始版本，但此前已经因覆盖丢失索引的版本无法凭空找回。历史记录必须随加密远端索引备份；若远端索引备份失败，应保留本地数据库并重试 `tas index backup`，不能把本地成功误认为异地备份完成。当前远端索引仍有单条消息大小限制，不会通过静默丢弃历史来缩小索引。
 
-GUI 中选中文件后，可从工具栏、右键菜单或“文件库”菜单打开“版本历史…”或“上传新版本…”。“已删除”侧栏保留被删除文件及其历史；恢复会追加新版本，永久清除另行确认。同名上传／拖入会提示保存为新版本或改用其他逻辑路径。
+GUI 可从“版本管理”选文件打开版本历史；在“所有文件”或“已删除”中选中文件后，也可从工具栏、右键菜单或“文件库”菜单打开“版本历史…”或“上传新版本…”。“已删除”侧栏保留被删除文件及其历史；恢复会追加新版本，永久清除另行确认。同名上传／拖入会提示保存为新版本或改用其他逻辑路径。v1.1.1 的界面增加浅色概览、重排侧栏与底部语言/主题占位（占位尚不能切换）。
 
 `status --json` 的 `originalBytes` 是活动文件当前版本的原始大小合计；`storedBytes` 是全部保留版本引用的去重内容对象存储大小；`historyBytes` 是其中未被任何活动当前版本引用的部分（包含已删除文件）。两种存储量均不含分块头和索引消息，恢复复用内容不会重复计数。
 
@@ -90,7 +90,7 @@ CLI 测试使用隔离目录和本机 HTTP fixture，不访问真实 Telegram �
 
 ## 从源码构建
 
-需要 Apple Silicon Mac、Xcode 或 Command Line Tools、Swift 6.0+：
+需要 macOS 26、Apple Silicon Mac、Xcode 26 / Swift 6.2+：
 
 ```sh
 git clone https://github.com/liuchzzyy/tas-macos.git

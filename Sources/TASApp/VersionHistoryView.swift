@@ -146,65 +146,75 @@ struct VersionHistoryView: View {
     private var selection: FileVersion? { versions.first { $0.id == selected } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("版本历史").font(.title2.bold())
-                    Text(file?.filename ?? "文件已不可用").foregroundStyle(.secondary).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("版本历史").font(LibraryStyle.pageTitle)
+                    Text(file?.filename ?? "文件已不可用")
+                        .font(LibraryStyle.body).foregroundStyle(.secondary).textSelection(.enabled)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(file?.filename ?? "文件已不可用")
+                        .accessibilityLabel("文件：\(file?.filename ?? "文件已不可用")")
                 }
                 Spacer()
                 if model.busy { ProgressView().controlSize(.small) }
                 Button("完成") { dismiss() }.keyboardShortcut(.cancelAction).disabled(!model.canOperate)
             }
             if let file {
-                HStack {
-                    Text("当前 v\(file.versionNumber) · 共 \(file.versionCount) 个版本").font(.callout)
-                    if file.deleted { Label("已删除 · 历史保留", systemImage: "trash").foregroundStyle(.secondary) }
-                    Spacer()
-                    if file.syncPaused {
-                        Label("自动同步已暂停", systemImage: "pause.circle").foregroundStyle(.orange)
-                        Button("恢复自动同步…") { model.resumeFileSync(file) }.disabled(!model.canOperate || file.deleted)
+                LibrarySurface {
+                    HStack(spacing: 14) {
+                        Image(systemName: file.deleted ? "trash" : "clock.arrow.circlepath")
+                            .font(.system(size: 21)).foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("当前 v\(file.versionNumber) · 共 \(file.versionCount) 个版本")
+                                .font(.system(size: 19, weight: .semibold)).monospacedDigit()
+                            Text(file.deleted ? "已删除 · 历史保留，可恢复文件" : "选择版本以下载或恢复")
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if file.syncPaused {
+                            VStack(alignment: .trailing, spacing: 5) {
+                                Label("自动同步已暂停", systemImage: "pause.circle").font(LibraryStyle.helper).foregroundStyle(.orange)
+                                Button("恢复自动同步…") { model.resumeFileSync(file) }.disabled(!model.canOperate || file.deleted)
+                            }
+                        }
                     }
                 }
             }
-            Text("最新版本在前。下载不会更改当前版本；恢复会追加一个版本并暂停此文件的自动同步。").font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Text("版本时间线").font(LibraryStyle.sectionTitle)
+                Spacer()
+                Text("最新在前").font(LibraryStyle.helper).foregroundStyle(.secondary)
+            }
             List(selection: $selected) {
                 ForEach(versions) { version in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: version.isCurrent ? "checkmark.circle.fill" : "circle").foregroundStyle(version.isCurrent ? Color.accentColor : .secondary)
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack {
-                                Text("v\(version.number)").font(.headline)
-                                if version.isCurrent { Text("当前版本").font(.caption.weight(.semibold)).foregroundStyle(.tint) }
-                                Spacer()
-                                Text(version.createdAt).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text("\(bytes(version.originalSize)) · 存储 \(bytes(version.storedSize)) · 来源：\(sourceLabel(version.source))").font(.callout)
-                            if let sourceID = version.restoredFromVersionID {
-                                Text("恢复自 \(versions.first(where: { $0.id == sourceID }).map { "v\($0.number)" } ?? "版本 ID \(sourceID)")").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text(version.message.flatMap { $0.isEmpty ? nil : $0 } ?? "无备注").font(.callout).foregroundStyle(.secondary)
-                            Text("SHA-256  \(version.hash)").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                        }
-                    }.padding(.vertical, 9).tag(version.id)
+                    VersionTimelineRow(version: version, restoredFrom: version.restoredFromVersionID.flatMap { sourceID in
+                        versions.first(where: { $0.id == sourceID }).map { "v\($0.number)" } ?? "版本 ID \(sourceID)"
+                    }, source: sourceLabel(version.source))
+                    .tag(version.id)
                 }
             }.listStyle(.inset).disabled(!model.canOperate)
+                .background(LibraryStyle.surface, in: RoundedRectangle(cornerRadius: 14))
+                .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(LibraryStyle.hairline).allowsHitTesting(false) }
             if versions.isEmpty { Text(model.busy ? "正在载入版本…" : "没有可用的版本历史").foregroundStyle(.secondary) }
             if let notice = model.notice {
-                Text(notice).font(.callout).foregroundStyle(.orange).textSelection(.enabled).lineLimit(3)
+                Text(notice).font(LibraryStyle.body).foregroundStyle(.orange).textSelection(.enabled).lineLimit(3)
             }
+            Text("下载不会更改当前版本；恢复会追加一个新版本并暂停此文件的自动同步。")
+                .font(LibraryStyle.helper).foregroundStyle(.secondary)
             TextField("恢复备注（可选）", text: $note).textFieldStyle(.roundedBorder).disabled(!model.canOperate)
             HStack {
-                Text(model.busy ? model.progress.message : "本地源文件不会被恢复操作覆盖。").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(model.busy ? model.progress.message : "本地源文件不会被恢复操作覆盖。").font(LibraryStyle.helper).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
                 Button("下载所选版本…") { if let file, let selection { model.download(file, version: selection.number) } }.disabled(!model.canOperate || selection == nil || file == nil)
                 Button(file?.deleted == true ? "恢复文件为所选版本…" : "恢复为所选版本…") {
                     if let file, let selection { model.restore(file, version: selection, message: note) }
                 }.buttonStyle(.borderedProminent).disabled(!model.canOperate || selection == nil || file == nil)
             }
-        }.padding(24).frame(width: 780, height: 620)
+        }.padding(24).frame(width: 800, height: 660)
+        .background(LibraryStyle.canvas)
         .interactiveDismissDisabled(model.busy || model.presentingDialog)
-        .onChange(of: model.historyVersions) { _ in
+        .onChange(of: model.historyVersions) { _, _ in
             if !versions.contains(where: { $0.id == selected }) { selected = versions.first?.id }
         }
     }
@@ -217,6 +227,49 @@ struct VersionHistoryView: View {
         case "migration": return "旧版迁移"
         default: return source
         }
+    }
+}
+
+private struct VersionTimelineRow: View {
+    let version: FileVersion
+    let restoredFrom: String?
+    let source: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(spacing: 3) {
+                Image(systemName: version.isCurrent ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18)).foregroundStyle(version.isCurrent ? Color.accentColor : .secondary)
+                Rectangle().fill(LibraryStyle.hairline).frame(width: 1, height: 74)
+            }.accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("v\(version.number)").font(.system(size: 19, weight: .semibold)).monospacedDigit()
+                    if version.isCurrent {
+                        Text("当前版本").font(LibraryStyle.helper.weight(.semibold)).foregroundStyle(.tint)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.09), in: Capsule())
+                    }
+                    Spacer(minLength: 8)
+                    Text(version.createdAt).font(LibraryStyle.helper).foregroundStyle(.secondary)
+                        .lineLimit(1).help(version.createdAt)
+                }
+                Text("\(bytes(version.originalSize)) · 存储 \(bytes(version.storedSize)) · \(source)")
+                    .font(LibraryStyle.body).foregroundStyle(.secondary).lineLimit(1)
+                if let restoredFrom {
+                    Text("恢复自 \(restoredFrom)").font(LibraryStyle.helper).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(restoredFrom)
+                }
+                if let message = version.message, !message.isEmpty {
+                    Text(message).font(LibraryStyle.body).lineLimit(2).truncationMode(.tail).help(message)
+                }
+                Text("SHA-256  \(version.hash)")
+                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(version.hash)
+            }
+        }.padding(.vertical, 11)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("版本 \(version.number)\(version.isCurrent ? "，当前版本" : "")；\(version.createdAt)；原始大小 \(bytes(version.originalSize))；存储大小 \(bytes(version.storedSize))；来源 \(source)；\(version.message ?? "无备注")；SHA-256 \(version.hash)")
     }
 }
 #endif
