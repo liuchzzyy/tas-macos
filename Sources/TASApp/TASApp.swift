@@ -17,9 +17,19 @@ import TASCore
     @Published var notice: String?
     @Published var logs: [String] = []
     @Published var autoSync = false
+    @Published var selectedFileID: StoredFile.ID?
+    @Published var historyFile: StoredFile?
+    @Published var historyVersions: [FileVersion] = []
+    @Published var presentingDialog = false
     private var task: Task<Void, Never>?
     var configured: Bool { FileManager.default.fileExists(atPath: directory.appendingPathComponent("config.json").path) }
-    var totalSize: Int64 { files.reduce(0) { $0 + $1.originalSize } }
+    var activeFiles: [StoredFile] { files.filter { !$0.deleted } }
+    var totalSize: Int64? { try? checkedByteTotal(activeFiles.map(\.originalSize)) }
+    var selection: StoredFile? { files.first { $0.id == selectedFileID } }
+    var canOperate: Bool { vault != nil && !busy && !presentingDialog }
+    var canUseSelection: Bool { canOperate && historyFile == nil && selection != nil }
+    var canUploadVersion: Bool { canUseSelection && selection?.deleted == false }
+    var canResumeSync: Bool { canUploadVersion && selection?.syncPaused == true }
     func open(password: String, token: String?, chat: String?, endpoint: String?) {
         guard !busy else { return }; busy = true; notice = nil; progress = TransferProgress("正在解锁文件库")
         let directory = directory
@@ -32,13 +42,22 @@ import TASCore
             busy = false; task = nil
         }
     }
-    func lock() { guard !busy else { return }; autoSync = false; vault = nil; files = []; bots = []; pending = []; folders = []; logs = []; progress = TransferProgress("已锁定") }
+    func lock() {
+        guard canOperate && historyFile == nil else { return }
+        autoSync = false; vault = nil; files = []; bots = []; pending = []; folders = []; logs = []
+        selectedFileID = nil; historyFile = nil; historyVersions = []; progress = TransferProgress("已锁定")
+    }
     func refresh(_ vault: Vault) async throws {
-        files = try await vault.files(); bots = await vault.bots(); pending = try await vault.pending(); folders = try await vault.folders(); manifestDate = await vault.manifestDate()
+        files = try await vault.files(includeDeleted: true); bots = await vault.bots(); pending = try await vault.pending(); folders = try await vault.folders(); manifestDate = await vault.manifestDate()
+        if let selectedFileID, !files.contains(where: { $0.id == selectedFileID }) { self.selectedFileID = nil }
+        if let target = historyFile {
+            historyFile = files.first { $0.id == target.id }
+            historyVersions = historyFile == nil ? [] : try await vault.history(target.id).sorted { $0.number > $1.number }
+        }
     }
     func run(_ title: String, operation: @escaping (Vault, @escaping ProgressHandler) async throws -> OperationResult) {
-        guard let vault, !busy else { return }
-        busy = true; progress = TransferProgress(title)
+        guard let vault, canOperate else { return }
+        busy = true; notice = nil; progress = TransferProgress(title)
         task = Task {
             let handler: ProgressHandler = { [weak self] update in Task { @MainActor in self?.progress = update } }
             do {
@@ -48,29 +67,43 @@ import TASCore
                 if let warning = result.warning { notice = warning; logs.insert(warning, at: 0) }
             } catch is CancellationError { progress = TransferProgress("任务已取消，可在传输任务中继续上传"); logs.insert("任务已取消", at: 0) }
             catch { notice = error.localizedDescription; logs.insert(error.localizedDescription, at: 0); progress = TransferProgress("任务未完成") }
-            do { try await refresh(vault) } catch { notice = error.localizedDescription }
+            do { try await refresh(vault) } catch { notice = error.localizedDescription; progress = TransferProgress("刷新文件库失败") }
             busy = false; task = nil
         }
     }
     func cancel() { task?.cancel() }
     func upload(_ urls: [URL]) {
+        guard canOperate, historyFile == nil, !urls.isEmpty else { return }
+        presentingDialog = true
+        let requests = prepareUploads(urls)
+        presentingDialog = false
+        guard let requests else { return }
         run("准备上传") { vault, progress in
             var warnings: [String] = []
-            for url in urls {
-                let result = try await vault.upload(url, progress: progress)
+            for request in requests {
+                try Task.checkCancellation()
+                let result = try await vault.upload(request.url, name: request.name, replace: request.replace, message: request.message, progress: progress)
                 if let warning = result.warning { warnings.append(warning) }
             }
-            return OperationResult("已上传 \(urls.count) 个文件", warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))
+            return OperationResult("已上传 \(requests.count) 个文件", warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))
         }
     }
     func chooseUpload() {
+        guard canOperate, historyFile == nil else { return }
+        presentingDialog = true
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = true; panel.canChooseDirectories = false; panel.prompt = "上传"
-        if panel.runModal() == .OK { upload(panel.urls) }
+        let response = panel.runModal()
+        presentingDialog = false
+        if response == .OK { upload(panel.urls) }
     }
-    func download(_ file: StoredFile) {
-        let panel = NSSavePanel(); panel.nameFieldStringValue = URL(fileURLWithPath: file.filename).lastPathComponent; panel.prompt = "下载"
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
-        run("准备下载") { vault, progress in try await vault.download(file.id, to: destination, progress: progress); return OperationResult("已下载 \(file.filename)") }
+    func download(_ file: StoredFile, version: Int? = nil) {
+        guard canOperate, files.contains(where: { $0.id == file.id }) else { return }
+        presentingDialog = true
+        let panel = NSSavePanel(); panel.nameFieldStringValue = version.map { versionedFilename(file.filename, version: $0) } ?? URL(fileURLWithPath: file.filename).lastPathComponent; panel.prompt = "下载"
+        let response = panel.runModal()
+        presentingDialog = false
+        guard response == .OK, let destination = panel.url else { return }
+        run("准备下载") { vault, progress in try await vault.download(file.id, to: destination, version: version, progress: progress); return OperationResult("已下载 \(file.filename)\(version.map { " · v\($0)" } ?? "")") }
     }
     func addFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.prompt = "添加同步目录"
@@ -111,10 +144,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         .defaultSize(width: 1120, height: 760)
         .commands {
-            CommandGroup(replacing: .newItem) { Button("上传文件…") { model.chooseUpload() }.keyboardShortcut("u").disabled(model.vault == nil || model.busy) }
+            CommandGroup(replacing: .newItem) { Button("上传文件…") { model.chooseUpload() }.keyboardShortcut("u").disabled(!model.canOperate || model.historyFile != nil) }
             CommandMenu("文件库") {
-                Button("锁定文件库") { model.lock() }.keyboardShortcut("l", modifiers: [.command, .shift]).disabled(model.vault == nil || model.busy)
-                Button("备份索引") { model.run("备份索引") { vault, _ in try await vault.backupIndex() } }.disabled(model.vault == nil || model.busy)
+                Button("上传新版本…") { if let file = model.selection { model.chooseNewVersion(file) } }.disabled(!model.canUploadVersion)
+                Button("版本历史…") { if let file = model.selection { model.showHistory(file) } }.keyboardShortcut("h", modifiers: [.command, .shift]).disabled(!model.canUseSelection)
+                Button("恢复自动同步…") { if let file = model.selection { model.resumeFileSync(file) } }.disabled(!model.canResumeSync)
+                Divider()
+                Button("删除并保留历史…") { if let file = model.selection { model.deleteFile(file) } }.disabled(!model.canUploadVersion)
+                Button("永久清除…", role: .destructive) { if let file = model.selection { model.deleteFile(file, permanently: true) } }.disabled(!model.canUseSelection || model.selection?.deleted != true)
+                Divider()
+                Button("锁定文件库") { model.lock() }.keyboardShortcut("l", modifiers: [.command, .shift]).disabled(!model.canOperate || model.historyFile != nil)
+                Button("备份索引") { model.run("备份索引") { vault, _ in try await vault.backupIndex() } }.disabled(!model.canOperate || model.historyFile != nil)
             }
         }
     }
@@ -136,13 +176,14 @@ struct RootView: View {
                         }.padding(22)
                         List(selection: $section) {
                             Label("所有文件", systemImage: "folder").tag("files")
+                            Label("已删除", systemImage: "trash").tag("deleted")
                             Label("传输任务", systemImage: "arrow.up.arrow.down").tag("transfers")
                             Label("文件夹同步", systemImage: "arrow.triangle.2.circlepath").tag("sync")
                             Label("设置", systemImage: "slider.horizontal.3").tag("settings")
                         }.listStyle(.sidebar)
                         VStack(alignment: .leading, spacing: 8) {
                             Label("文件库已解锁", systemImage: "lock.open").font(.caption).foregroundStyle(.secondary)
-                            Text("\(model.files.count) 个文件 · \(bytes(model.totalSize))").font(.caption)
+                            Text("\(model.activeFiles.count) 个文件 · \(model.totalSize.map(bytes) ?? "大小无效")").font(.caption)
                             Button { model.lock() } label: { Label("锁定文件库", systemImage: "lock") }.disabled(model.busy)
                         }.padding(20)
                     }.navigationSplitViewColumnWidth(min: 205, ideal: 225, max: 260)
@@ -153,7 +194,8 @@ struct RootView: View {
                             case "transfers": TransfersView()
                             case "sync": SyncView()
                             case "settings": SettingsView()
-                            default: LibraryView()
+                            case "deleted": LibraryView(showDeleted: true).id("deleted")
+                            default: LibraryView().id("files")
                             }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                         Divider()
@@ -171,7 +213,11 @@ struct RootView: View {
                 }
             }
         }
-        .onReceive(timer) { _ in if model.autoSync && !model.busy && model.vault != nil { model.run("自动同步") { vault, progress in try await vault.sync(progress: progress) } } }
+        .sheet(item: $model.historyFile, onDismiss: { model.historyVersions = [] }) { file in
+            VersionHistoryView(fileID: file.id).environmentObject(model)
+        }
+        .onChange(of: section) { _ in model.selectedFileID = nil }
+        .onReceive(timer) { _ in if model.autoSync && model.canOperate && model.historyFile == nil { model.run("自动同步") { vault, progress in try await vault.sync(progress: progress) } } }
     }
 }
 
@@ -232,24 +278,24 @@ struct UnlockView: View {
 
 struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
+    var showDeleted = false
     @State private var search = ""
-    @State private var selected: StoredFile.ID?
     @State private var targeted = false
-    @State private var tagging = false
+    @State private var tagging: StoredFile?
     @State private var tag = ""
     @State private var removeTag = false
-    var filtered: [StoredFile] { model.files.filter { search.isEmpty || $0.filename.localizedCaseInsensitiveContains(search) || $0.tags.contains(where: { $0.localizedCaseInsensitiveContains(search) }) } }
-    var selection: StoredFile? { model.files.first { $0.id == selected } }
+    var filtered: [StoredFile] { model.files.filter { $0.deleted == showDeleted && (search.isEmpty || $0.filename.localizedCaseInsensitiveContains(search) || $0.tags.contains(where: { $0.localizedCaseInsensitiveContains(search) })) } }
+    var selection: StoredFile? { filtered.first { $0.id == model.selectedFileID } }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack {
-                VStack(alignment: .leading, spacing: 7) { Text("所有文件").font(.largeTitle.bold()); Text("上传、查找和取回你的文件。").foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 7) { Text(showDeleted ? "已删除" : "所有文件").font(.largeTitle.bold()); Text(showDeleted ? "全部历史仍然保留，可选择版本恢复文件。" : "上传、查找和取回你的文件。").foregroundStyle(.secondary) }
                 Spacer()
-                Button { model.chooseUpload() } label: { Label("上传文件", systemImage: "plus") }.buttonStyle(.borderedProminent).controlSize(.large).disabled(model.busy)
+                Button { model.chooseUpload() } label: { Label("上传文件", systemImage: "plus") }.buttonStyle(.borderedProminent).controlSize(.large).disabled(!model.canOperate)
             }
             HStack(spacing: 16) {
-                Metric(title: "文件", value: "\(model.files.count)", icon: "doc.on.doc")
-                Metric(title: "原始大小", value: bytes(model.totalSize), icon: "externaldrive")
+                Metric(title: showDeleted ? "已删除" : "文件", value: "\(model.files.filter { $0.deleted == showDeleted }.count)", icon: "doc.on.doc")
+                Metric(title: "原始大小", value: (try? checkedByteTotal(model.files.filter { $0.deleted == showDeleted }.map(\.originalSize))).map(bytes) ?? "大小无效", icon: "externaldrive")
                 Metric(title: "待续传", value: "\(model.pending.count)", icon: "arrow.up.circle")
             }
             HStack {
@@ -257,31 +303,49 @@ struct LibraryView: View {
                 TextField("搜索文件名或标签", text: $search).textFieldStyle(.plain)
                 Spacer()
                 if let selection {
-                    Button { model.download(selection) } label: { Image(systemName: "arrow.down.to.line") }.help("下载").disabled(model.busy)
-                    Button { tagging = true } label: { Image(systemName: "tag") }.help("编辑标签").disabled(model.busy)
-                    Button(role: .destructive) { delete(selection) } label: { Image(systemName: "trash") }.help("删除").disabled(model.busy)
+                    Button { model.download(selection) } label: { Image(systemName: "arrow.down.to.line") }.help("下载当前版本").accessibilityLabel("下载当前版本").disabled(!model.canOperate)
+                    Button { model.showHistory(selection) } label: { Label("版本历史", systemImage: "clock.arrow.circlepath") }.disabled(!model.canUseSelection)
+                    if !selection.deleted {
+                        Button { model.chooseNewVersion(selection) } label: { Image(systemName: "doc.badge.plus") }.help("上传新版本").accessibilityLabel("上传新版本").disabled(!model.canUploadVersion)
+                        Button { tagging = selection; model.presentingDialog = true } label: { Image(systemName: "tag") }.help("编辑标签").accessibilityLabel("编辑标签").disabled(!model.canOperate)
+                        if selection.syncPaused {
+                            Button { model.resumeFileSync(selection) } label: { Image(systemName: "play.circle") }.help("恢复自动同步").accessibilityLabel("恢复自动同步").disabled(!model.canResumeSync)
+                        }
+                    }
+                    Button(role: .destructive) { model.deleteFile(selection, permanently: selection.deleted) } label: { Image(systemName: selection.deleted ? "trash.slash" : "trash") }.help(selection.deleted ? "永久清除" : "删除并保留历史").accessibilityLabel(selection.deleted ? "永久清除" : "删除并保留历史").disabled(!model.canUseSelection)
                 }
             }.padding(12).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
             if filtered.isEmpty {
                 VStack(spacing: 15) {
                     Image(systemName: search.isEmpty ? "tray.and.arrow.up" : "magnifyingglass").font(.system(size: 43, weight: .light)).foregroundStyle(.secondary)
-                    Text(search.isEmpty ? "把文件拖到这里" : "没有找到文件").font(.title3.weight(.medium))
-                    Text(search.isEmpty ? "也可以点击“上传文件”开始。" : "试试其他文件名或标签。").foregroundStyle(.secondary)
+                    Text(search.isEmpty ? (showDeleted ? "没有已删除的文件" : "把文件拖到这里") : "没有找到文件").font(.title3.weight(.medium))
+                    Text(search.isEmpty ? (showDeleted ? "删除的文件会保留版本历史。" : "也可以点击“上传文件”开始。") : "试试其他文件名或标签。").foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Table(filtered, selection: $selected) {
-                    TableColumn("文件名") { file in HStack(spacing: 9) { Image(systemName: "doc").foregroundStyle(.tint); VStack(alignment: .leading, spacing: 3) { Text(file.filename).lineLimit(1); if !file.tags.isEmpty { Text(file.tags.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) } } } }.width(min: 220, ideal: 360)
+                Table(filtered, selection: $model.selectedFileID) {
+                    TableColumn("文件名") { file in HStack(spacing: 9) { Image(systemName: file.deleted ? "trash" : "doc").foregroundStyle(.tint); VStack(alignment: .leading, spacing: 3) { Text(file.filename).lineLimit(1); if !file.tags.isEmpty { Text(file.tags.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }; if file.syncPaused { Label("自动同步已暂停", systemImage: "pause.circle").font(.caption).foregroundStyle(.orange) } } } }.width(min: 180, ideal: 290)
+                    TableColumn("版本") { Text("v\($0.versionNumber) · 共 \($0.versionCount)").monospacedDigit() }.width(95)
                     TableColumn("大小") { Text(bytes($0.originalSize)).monospacedDigit() }.width(95)
-                    TableColumn("分块") { Text("\($0.chunks)").foregroundStyle(.secondary) }.width(45)
-                    TableColumn("上传时间") { Text(String($0.createdAt.prefix(16)).replacingOccurrences(of: "T", with: " ")).foregroundStyle(.secondary) }.width(140)
-                }.contextMenu {
-                    if let selection { Button("下载…") { model.download(selection) }; Button("编辑标签…") { tagging = true }; Divider(); Button("删除…", role: .destructive) { delete(selection) } }
-                }.disabled(model.busy)
+                    TableColumn("更新时间") { Text(String($0.updatedAt.prefix(16)).replacingOccurrences(of: "T", with: " ")).foregroundStyle(.secondary) }.width(140)
+                }.contextMenu(forSelectionType: StoredFile.ID.self) { ids in
+                    if ids.count == 1, let id = ids.first, let file = filtered.first(where: { $0.id == id }) {
+                        Button("下载…") { model.download(file) }
+                        Button("版本历史…") { model.showHistory(file) }
+                        if !file.deleted {
+                            Button("上传新版本…") { model.chooseNewVersion(file) }
+                            Button("编辑标签…") { tagging = file; model.presentingDialog = true }
+                            Button("恢复自动同步…") { model.resumeFileSync(file) }.disabled(!file.syncPaused)
+                        }
+                        Divider()
+                        Button(file.deleted ? "永久清除…" : "删除并保留历史…", role: .destructive) { model.deleteFile(file, permanently: file.deleted) }
+                    }
+                }.disabled(!model.canOperate)
             }
         }.padding(28)
         .overlay { if targeted { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8])).padding(10).allowsHitTesting(false) } }
         .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { providers in
-            guard !model.busy else { return false }
+            guard model.canOperate, model.historyFile == nil, !showDeleted else { return false }
+            let session = model.vault
             Task {
                 var urls: [URL] = []
                 for provider in providers {
@@ -293,25 +357,23 @@ struct LibraryView: View {
                     }
                     if let url { urls.append(url) }
                 }
-                if !urls.isEmpty { model.upload(urls) }
+                if model.vault === session, !urls.isEmpty { model.upload(urls) }
             }
             return true
         }
-        .sheet(isPresented: $tagging) {
+        .onChange(of: filtered.map(\.id)) { ids in if let id = model.selectedFileID, !ids.contains(id) { model.selectedFileID = nil } }
+        .onDisappear { model.selectedFileID = nil }
+        .sheet(item: $tagging, onDismiss: { model.presentingDialog = false }) { target in
             VStack(alignment: .leading, spacing: 18) {
                 Text("编辑标签").font(.title2.bold())
-                Text(selection?.filename ?? "").foregroundStyle(.secondary)
+                Text(target.filename).foregroundStyle(.secondary)
                 TextField("标签", text: $tag).textFieldStyle(.roundedBorder)
                 Toggle("移除此标签", isOn: $removeTag)
-                HStack { Spacer(); Button("取消") { tagging = false }; Button("保存") { if let selection { let value = tag, remove = removeTag; model.run("更新标签") { vault, _ in try await vault.tag(selection.id, value: value, remove: remove) } }; tagging = false }.buttonStyle(.borderedProminent).disabled(tag.isEmpty) }
+                HStack { Spacer(); Button("取消") { tagging = nil }; Button("保存") { let value = tag, remove = removeTag; model.presentingDialog = false; model.run("更新标签") { vault, _ in try await vault.tag(target.id, value: value, remove: remove) }; tagging = nil }.buttonStyle(.borderedProminent).disabled(tag.isEmpty || model.busy || model.vault == nil) }
             }.padding(28).frame(width: 360)
         }
     }
-    private func delete(_ file: StoredFile) {
-        let alert = NSAlert(); alert.messageText = "删除“\(file.filename)”？"; alert.informativeText = "将从文件库索引中移除，并更新远端恢复索引。"; alert.addButton(withTitle: "删除"); alert.addButton(withTitle: "取消")
-        alert.showsSuppressionButton = true; alert.suppressionButton?.title = "同时删除 Telegram 中的分块消息"
-        if alert.runModal() == .alertFirstButtonReturn { let hard = alert.suppressionButton?.state == .on; model.run("删除文件") { vault, _ in try await vault.delete(file.id, hard: hard) } }
-    }
+
 }
 struct Metric: View {
     let title: String; let value: String; let icon: String
@@ -344,7 +406,7 @@ struct SyncView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack { Text("文件夹同步").font(.largeTitle.bold()); Spacer(); Button("添加目录…") { model.addFolder() }.disabled(model.busy); Button("立即同步") { model.run("同步文件夹") { vault, progress in try await vault.sync(progress: progress) } }.buttonStyle(.borderedProminent).disabled(model.busy || model.folders.isEmpty) }
-            Text("按相对路径上传新增和修改的文件。本地删除不会删除远端文件；不同目录中的相同路径会更新同一份文件。").foregroundStyle(.secondary)
+            Text("按相对路径上传新增文件，修改内容会保存为新版本。本地删除不会删除远端文件；多个同步目录出现相同相对路径时会报告冲突，并在上传前停止本轮同步。恢复历史后，该文件的自动同步会暂停；可在文件列表中明确恢复。").foregroundStyle(.secondary)
             Toggle("应用打开时，每 30 秒检查一次变化", isOn: $model.autoSync).disabled(model.folders.isEmpty)
             List(model.folders) { folder in HStack { Image(systemName: "folder").foregroundStyle(.tint); Text(folder.path).textSelection(.enabled); Spacer(); Button("移除") { model.run("移除同步目录") { vault, _ in try await vault.removeFolder(folder.id); return OperationResult("已移除同步目录") } }.disabled(model.busy) }.padding(.vertical, 8) }
             HStack { Text("需要在另一台 Mac 取回文件？").foregroundStyle(.secondary); Spacer(); Button("恢复全部文件…") { model.restoreAll() }.disabled(model.busy) }
@@ -374,6 +436,7 @@ struct SettingsView: View {
                             Button("恢复索引…") { rebuild() }
                             Button("检查连接") { model.run("检查连接") { vault, _ in try await vault.checkBots() } }
                             Button("完整校验") { model.run("完整校验") { vault, progress in try await vault.verify(deep: true, progress: progress) } }
+                            Button("校验全部历史") { model.run("校验全部历史") { vault, progress in try await vault.verify(deep: true, allVersions: true, progress: progress) } }
                         }.disabled(model.busy)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                 }

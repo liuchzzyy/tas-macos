@@ -19,21 +19,24 @@ struct Arguments {
 }
 @main struct CLI {
     static let help = """
-    TAS 1.0 — 原生 Swift Telegram 文件库
+    TAS 1.1.0 — 原生 Swift Telegram 文件库
     用法：tas <命令> [选项]
 
       init                       创建文件库，交互输入 Token、Chat ID 和密码
-      push <文件...>             上传（--name 路径，--replace 替换同名文件）
-      pull <ID或完整路径>         下载（--output 目标文件）
-      list | search <关键词>     列出文件（--tag 标签，--json）
-      delete <ID或完整路径>       删除索引（--hard 同时删除 Telegram 消息）
+      push <文件...>             上传（--name 路径，--new-version / --replace 保留旧版本，--message 备注）
+      pull <ID或完整路径>         下载（--version 正整数 指定历史版本，--output 目标文件）
+      history <ID或完整路径>      列出版本历史（--json，含已删除文件）
+      restore <ID或完整路径>      恢复为新版本（--version 正整数，--message 备注）；暂停此路径同步
+      list | search <关键词>     列出文件（--tag 标签，--deleted 仅已删除，--json）
+      delete <ID或完整路径>       软删除并保留历史；已删除文件可用 --hard --yes 永久清除
       tag add|remove <文件> <标签>
       resume                     继续上传（--clear ID 清除任务）
       status                     查看文件、容量和待上传任务（--json）
       bot list|add|enable|disable|remove|endpoint
       index backup|rebuild       备份／恢复加密索引
-      verify                     检查远端分块（--deep 下载解密并校验）
+      verify                     检查远端分块（--all-versions 包含历史，--deep 下载解密并校验）
       sync add <目录> | remove <ID> | status | start [--watch]
+      sync resume <文件ID或路径>  解除恢复后的同步暂停；本机内容可能成为新版本
       sync pull <目录>           按逻辑路径恢复全部文件
       doctor                     检查机器人连接和 SQLite 完整性
 
@@ -64,16 +67,29 @@ struct Arguments {
     }
     static func emit<T: Encodable>(_ value: T) throws { let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; print(String(decoding: try encoder.encode(value), as: UTF8.self)) }
     static func result(_ value: OperationResult) { print(value.message); if let warning = value.warning { fputs("提示：\(warning)\n", stderr) } }
-    static func identify(_ value: String, vault: Vault) async throws -> Int64 {
+    static func identify(_ value: String, vault: Vault, includeDeleted: Bool = false) async throws -> Int64 {
         if let id = Int64(value) { return id }
-        let matches = try await vault.files(search: value).filter { $0.filename == value }
-        guard matches.count == 1 else { throw TASError("请使用文件 ID 或完整逻辑路径") }; return matches[0].id
+        // An explicit ./ prefix selects a numeric filename rather than a file ID.
+        let path = value.hasPrefix("./") ? String(value.dropFirst(2)) : value
+        let matches = try await vault.files(search: path, includeDeleted: includeDeleted).filter { $0.filename == path }
+        guard matches.count == 1 else { throw TASError("请使用文件 ID 或唯一的完整逻辑路径；纯数字文件名请加 ./ 前缀") }; return matches[0].id
+    }
+    static func requireConfirmation(hard: Bool, confirmed: Bool) throws {
+        if hard && !confirmed { throw TASError("永久清除全部历史无法撤销；请先软删除，再使用 --hard --yes 确认") }
+        if confirmed && !hard { throw TASError("--yes 仅用于 --hard 永久清除") }
+    }
+    static func versionOption(_ args: inout Arguments, required: Bool = false) throws -> Int? {
+        guard let value = try args.option("--version") else {
+            if required { throw TASError("缺少 --version 正整数") }; return nil
+        }
+        guard value.allSatisfy({ $0.isASCII && $0.isNumber }), let version = Int(value), version > 0 else { throw TASError("版本号必须为正整数") }
+        return version
     }
     static func run() async throws {
         var args = Arguments(values: Array(CommandLine.arguments.dropFirst()))
         if args.flag("--self-test") { print(try Diagnostics.selfTest()); return }
         if args.flag("--help") || args.values.isEmpty { print(help); return }
-        if args.flag("--version") { print("tas 1.0.1 (Swift)"); return }
+        if args.values == ["--version"] { print("tas 1.1.0 (Swift)"); return }
         let directory = try args.option("--data-dir").map { URL(fileURLWithPath: $0, isDirectory: true) } ?? Paths.dataDirectory
         let passwordFile = try args.option("--password-file"); let json = args.flag("--json")
         let command = try args.pop("缺少命令")
@@ -89,20 +105,41 @@ struct Arguments {
         let progress: ProgressHandler = { event in fputs("\(event.message)\n", stderr) }
         switch command {
         case "list", "ls", "search":
-            let tag = try args.option("--tag"); let search = command == "search" ? try args.pop("缺少搜索词") : ""; try args.finish()
-            let files = try await vault.files(search: search, tag: tag)
+            let tag = try args.option("--tag"), deleted = args.flag("--deleted")
+            let search = command == "search" ? try args.pop("缺少搜索词") : ""; try args.finish()
+            let files = try await vault.files(search: search, tag: tag, includeDeleted: deleted).filter { $0.deleted == deleted }
             if json { try emit(files) } else { for file in files { print("\(file.id)\t\(ByteCountFormatter.string(fromByteCount: file.originalSize, countStyle: .file))\t\(file.filename)\t\(file.tags.joined(separator: ","))") } }
+        case "history":
+            let id = try await identify(args.pop("缺少文件 ID 或完整路径"), vault: vault, includeDeleted: true); try args.finish()
+            let versions = try await vault.history(id)
+            if json { try emit(versions) } else {
+                for version in versions {
+                    print("v\(version.number)\t\(version.isCurrent ? "当前" : "历史")\t\(version.createdAt)\t\(version.originalSize) 字节\t\(version.source)\t\(version.message ?? "")")
+                }
+            }
         case "push":
-            let name = try args.option("--name"); let replace = args.flag("--replace")
+            let name = try args.option("--name"), message = try args.option("--message")
+            let replace = args.flag("--replace"), newVersion = args.flag("--new-version")
             guard !args.values.isEmpty && (name == nil || args.values.count == 1) else { throw TASError("请提供文件；--name 仅用于单个文件") }
-            for path in args.values { result(try await vault.upload(URL(fileURLWithPath: path), name: name, replace: replace, progress: progress)) }
+            guard !args.values.contains(where: { $0.hasPrefix("--") }) else { throw TASError("上传参数无法识别") }
+            for path in args.values { result(try await vault.upload(URL(fileURLWithPath: path), name: name, replace: replace || newVersion, message: message, progress: progress)) }
         case "pull":
-            let output = try args.option("--output"); let id = try await identify(args.pop("缺少文件 ID"), vault: vault); try args.finish()
-            guard let file = try await vault.files().first(where: { $0.id == id }) else { throw TASError("文件不存在") }
-            let target = URL(fileURLWithPath: output ?? URL(fileURLWithPath: file.filename).lastPathComponent)
-            try await vault.download(id, to: target, progress: progress); print(target.path)
+            let output = try args.option("--output"), version = try versionOption(&args)
+            let id = try await identify(args.pop("缺少文件 ID"), vault: vault, includeDeleted: true); try args.finish()
+            guard let file = try await vault.files(includeDeleted: true).first(where: { $0.id == id }) else { throw TASError("文件不存在") }
+            let basename = URL(fileURLWithPath: file.filename).lastPathComponent
+            let target = URL(fileURLWithPath: output ?? (version.map { "v\($0)-\(basename)" } ?? basename))
+            try await vault.download(id, to: target, version: version, progress: progress); print(target.path)
+        case "restore":
+            let version = try versionOption(&args, required: true)!
+            let message = try args.option("--message")
+            let id = try await identify(args.pop("缺少文件 ID 或完整路径"), vault: vault, includeDeleted: true); try args.finish()
+            result(try await vault.restoreVersion(id, version: version, message: message, progress: progress))
         case "delete", "rm":
-            let hard = args.flag("--hard"); let id = try await identify(args.pop("缺少文件 ID"), vault: vault); try args.finish(); result(try await vault.delete(id, hard: hard))
+            let hard = args.flag("--hard"), confirmed = args.flag("--yes")
+            try requireConfirmation(hard: hard, confirmed: confirmed)
+            let id = try await identify(args.pop("缺少文件 ID"), vault: vault, includeDeleted: true); try args.finish()
+            result(try await vault.delete(id, hard: hard))
         case "tag":
             let action = try args.pop("缺少 add/remove"); let id = try await identify(args.pop("缺少文件 ID"), vault: vault); let value = try args.pop("缺少标签"); try args.finish()
             guard ["add", "remove"].contains(action) else { throw TASError("请使用 tag add/remove") }; result(try await vault.tag(id, value: value, remove: action == "remove"))
@@ -110,14 +147,16 @@ struct Arguments {
             if let clear = try args.option("--clear"), let id = Int64(clear) { try args.finish(); result(try await vault.clearPending(id)) }
             else { try args.finish(); result(try await vault.resume(progress: progress)) }
         case "status":
-            try args.finish(); let files = try await vault.files(), pending = try await vault.pending()
-            struct Status: Encodable { let files: Int; let originalBytes: Int64; let storedBytes: Int64; let pending: [PendingUpload]; let manifestDate: String? }
-            let status = await Status(files: files.count, originalBytes: files.reduce(0) { $0 + $1.originalSize }, storedBytes: files.reduce(0) { $0 + $1.storedSize }, pending: pending, manifestDate: vault.manifestDate())
-            if json { try emit(status) } else { print("\(status.files) 个文件 · 原始 \(status.originalBytes) 字节 · 已存储 \(status.storedBytes) 字节\n待上传：\(pending.count)\n索引备份：\(status.manifestDate ?? "尚未备份")") }
+            try args.finish(); let stats = try await vault.statistics(), pending = try await vault.pending()
+            struct Status: Encodable { let files: Int; let deletedFiles: Int; let versions: Int; let originalBytes: Int64; let storedBytes: Int64; let historyBytes: Int64; let pending: [PendingUpload]; let manifestDate: String? }
+            let status = await Status(files: stats.files, deletedFiles: stats.deletedFiles, versions: stats.versions, originalBytes: stats.originalBytes, storedBytes: stats.storedBytes, historyBytes: stats.historyBytes, pending: pending, manifestDate: vault.manifestDate())
+            if json { try emit(status) } else { print("\(status.files) 个文件 · 已删除 \(status.deletedFiles) · 共 \(status.versions) 个版本\n当前原始 \(status.originalBytes) 字节 · 存储 \(status.storedBytes) 字节 · 历史 \(status.historyBytes) 字节\n待上传：\(pending.count)\n索引备份：\(status.manifestDate ?? "尚未备份")") }
         case "index":
             let action = try args.pop("缺少 backup/rebuild"); try args.finish()
             switch action { case "backup": result(try await vault.backupIndex()); case "rebuild": result(try await vault.rebuildIndex()); default: throw TASError("请使用 index backup/rebuild") }
-        case "verify": let deep = args.flag("--deep"); try args.finish(); result(try await vault.verify(deep: deep, progress: progress))
+        case "verify":
+            let deep = args.flag("--deep"), allVersions = args.flag("--all-versions"); try args.finish()
+            result(try await vault.verify(deep: deep, allVersions: allVersions, progress: progress))
         case "doctor": try args.finish(); result(try await vault.checkBots())
         case "bot":
             let action = try args.pop("缺少机器人操作")
@@ -137,6 +176,9 @@ struct Arguments {
             switch action {
             case "add": let path = try args.pop("缺少目录"); try args.finish(); try await vault.addFolder(URL(fileURLWithPath: path)); print("同步目录已添加")
             case "remove": let id = Int64(try args.pop("缺少目录 ID")); try args.finish(); guard let id else { throw TASError("目录 ID 无效") }; try await vault.removeFolder(id)
+            case "resume":
+                let id = try await identify(args.pop("缺少文件 ID 或完整路径"), vault: vault); try args.finish()
+                result(try await vault.resumeSync(id))
             case "status": try args.finish(); try emit(try await vault.folders())
             case "pull": let path = try args.pop("缺少目标目录"); try args.finish(); result(try await vault.restoreAll(to: URL(fileURLWithPath: path), progress: progress))
             case "start": let watch = args.flag("--watch"); try args.finish(); result(try await vault.resume(progress: progress)); repeat { result(try await vault.sync(progress: progress)); if watch { try await Task.sleep(nanoseconds: 30_000_000_000) } } while watch

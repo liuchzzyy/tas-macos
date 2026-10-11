@@ -20,6 +20,15 @@ func jsonData(_ value: Any) throws -> Data { try JSONSerialization.data(withJSON
 func jsonObject(_ data: Data) throws -> JSON { guard let value = try JSONSerialization.jsonObject(with: data) as? JSON else { throw TASError("无效的 JSON 数据") }; return value }
 func timestamp() -> String { ISO8601DateFormatter().string(from: Date()) }
 
+/// Reject corrupt byte counts rather than trapping or displaying wrapped totals.
+public func checkedByteTotal<S: Sequence>(_ values: S) throws -> Int64 where S.Element == Int64 {
+    try values.reduce(Int64(0)) { total, value in
+        let (sum, overflow) = total.addingReportingOverflow(value)
+        try require(value >= 0 && !overflow, "索引大小总计无效或溢出")
+        return sum
+    }
+}
+
 public enum Paths {
     public static var dataDirectory: URL {
         if let override = ProcessInfo.processInfo.environment["TAS_DATA_DIR"] { return URL(fileURLWithPath: override, isDirectory: true) }

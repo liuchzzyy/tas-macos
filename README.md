@@ -6,7 +6,7 @@
 
 ## 获取与运行
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/latest) 下载最新版 Apple Silicon (arm64) DMG；当前版本是 [v1.0.1](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.0.1)，可直接下载 [TAS-1.0.1-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.0.1/TAS-1.0.1-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.0.1/TAS-1.0.1-arm64.dmg.sha256)）。仓库目前为私有仓库，下载需有访问权限。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/latest) 下载最新版 Apple Silicon (arm64) DMG；v1.1.0 发布后可直接下载 [TAS-1.1.0-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.0/TAS-1.1.0-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.1.0/TAS-1.1.0-arm64.dmg.sha256)）。仓库目前为私有仓库，下载需有访问权限。
 
 打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 
@@ -15,6 +15,65 @@
 首次使用填写 Bot Token、Chat ID 和加密密码。新文件库密码至少 12 位，并包含大小写字母、数字和符号；创建界面逐项提示，已有文件库仍可用原密码解锁。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。设置中的“检查更新”读取 GitHub 最新 Release；私有仓库需在本机安装 GitHub CLI 并完成 `gh auth login`，或使用浏览器打开 Releases。
 
 已有 TAS 用户可以直接选择原来的 `~/.tas` 目录并输入原密码。请先退出旧客户端，并备份整个数据目录；原生版使用进程锁防止同时写入，但旧版部分命令不遵守此锁。
+
+## 文件版本历史（v1.1.0）
+
+v1.1.0 引入文件版本历史。升级真实文件库前请先独立备份整个数据目录；可先在独立测试文件库中验证流程。
+
+- 一个完整逻辑路径对应一个稳定文件 ID。更新只新增版本，列表默认显示当前版本。
+- 与当前版本内容相同的更新跳过；与历史版本相同但与当前不同的内容仍可成为新版本。
+- 恢复历史版本会追加一个新版本，保留恢复前的所有版本；不直接修改本机同步源文件。
+- 恢复会暂停该逻辑路径的自动上传，防止下一轮同步立即把本机内容重新设为当前版本。整理好本机源文件后显式恢复同步。
+- 普通删除保留历史；永久清除必须先软删除，再单独确认。默认不自动清理历史。
+
+```sh
+# 初次上传及更新（--replace 兼容旧命令，但现在保留历史）
+tas push report.pdf --name documents/report.pdf --message "初稿"
+tas push report.pdf --name documents/report.pdf --new-version --message "修订稿"
+tas history documents/report.pdf --json
+
+# 取回历史内容，不改变当前版本
+tas pull documents/report.pdf --version 1 --output ~/Downloads/report-v1.pdf
+
+# 追加一个内容来自 v1 的新版本，并暂停该路径同步
+tas restore documents/report.pdf --version 1 --message "恢复初稿"
+tas sync resume documents/report.pdf
+
+# 软删除仍可查看历史和恢复
+tas delete documents/report.pdf
+tas list --deleted
+tas history documents/report.pdf
+tas restore documents/report.pdf --version 1
+
+# 永久清除：先软删除，再明确确认；不可撤销
+tas delete documents/report.pdf
+tas delete documents/report.pdf --hard --yes
+
+tas status --json
+tas verify --all-versions --deep
+```
+
+`--version` 在下载／恢复命令中是该文件内的正整数版本号；单独运行 `tas --version` 查看程序版本。文件参数支持稳定 ID 或完整逻辑路径；纯数字路径可加 `./` 前缀避免被解释为 ID。`list --deleted` 只列出已删除文件。
+
+升级前应退出旧客户端并独立备份整个数据目录。历史功能涉及新的索引格式，**升级后的文件库不要再交给旧客户端写入**。旧索引中仍存在的文件可以迁移为初始版本，但此前已经因覆盖丢失索引的版本无法凭空找回。历史记录必须随加密远端索引备份；若远端索引备份失败，应保留本地数据库并重试 `tas index backup`，不能把本地成功误认为异地备份完成。当前远端索引仍有单条消息大小限制，不会通过静默丢弃历史来缩小索引。
+
+GUI 中选中文件后，可从工具栏、右键菜单或“文件库”菜单打开“版本历史…”或“上传新版本…”。“已删除”侧栏保留被删除文件及其历史；恢复会追加新版本，永久清除另行确认。同名上传／拖入会提示保存为新版本或改用其他逻辑路径。
+
+`status --json` 的 `originalBytes` 是活动文件当前版本的原始大小合计；`storedBytes` 是全部保留版本引用的去重内容对象存储大小；`historyBytes` 是其中未被任何活动当前版本引用的部分（包含已删除文件）。两种存储量均不含分块头和索引消息，恢复复用内容不会重复计数。
+
+可重复验证：
+
+```sh
+swift test -c release
+python3 scripts/test-history-cli.py --binary .build/release/tas
+./scripts/build-macos.sh
+```
+
+CLI 测试使用隔离目录和本机 HTTP fixture，不访问真实 Telegram 或 `~/.tas`。`scripts/smoke-history-gui.swift` 检查锁定态原生菜单，需要执行环境已有 Accessibility 权限；这不等同于解锁后的完整 GUI 交互验收。
+
+恢复、软删除、永久清除和解除同步暂停使用加密持久化发布日志协调 SQLite 与远端索引指针。启动时先完成未结束的发布，再允许后续修改；旧远端索引仅在本地与指针均完成后清理。崩溃可能留下未引用的远端消息，不会为了清理空间冒险删除仍被引用的内容。
+
+历史版本仍依赖 Telegram 消息、机器人配置、密码和恢复索引。版本历史不是独立备份，不能防御同一存储账户失效。
 
 ## 功能
 
@@ -27,7 +86,7 @@
 - 文件夹手动同步和应用运行期间每 30 秒自动检查；可按逻辑路径恢复全部文件。
 - 原生 Swift 命令行：上传、下载、搜索、标签、续传、机器人管理、同步、校验和诊断。
 
-这是原生版本的首个实现。**旧 Node 版的 HTTP 临时分享服务和 macFUSE 挂载尚未移植**；本版本不注册 Finder 虚拟磁盘。同步仅上传新增／修改，不镜像删除；多个同步目录的同名相对路径会更新同一份文件，兼容原版行为。
+这是原生版本的首个实现。**旧 Node 版的 HTTP 临时分享服务和 macFUSE 挂载尚未移植**；本版本不注册 Finder 虚拟磁盘。同步仅上传新增／修改，不镜像删除；当前源码会在上传前检测多个同步目录的同名相对路径，并拒绝有冲突的整轮同步（已发布 v1.0.1 的旧行为是更新同一份文件）。
 
 ## 从源码构建
 

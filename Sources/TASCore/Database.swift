@@ -1,7 +1,7 @@
 import Foundation
 import CSQLite
 
-public struct StoredFile: Identifiable, Codable, Hashable {
+public struct StoredFile: Identifiable, Codable, Hashable, Sendable {
     public let id: Int64
     public let filename: String
     public let hash: String
@@ -11,11 +11,20 @@ public struct StoredFile: Identifiable, Codable, Hashable {
     public let compressed: Bool
     public let createdAt: String
     public var tags: [String]
+    public let versionNumber: Int
+    public let versionCount: Int
+    public let updatedAt: String
+    public let deleted: Bool
+    public let syncPaused: Bool
+    let objectID: Int64
     init(_ row: JSON, tags: [String] = []) {
         id = number(row["id"]); filename = string(row["filename"]); hash = string(row["hash"])
         originalSize = number(row["original_size"]); storedSize = number(row["stored_size"])
         chunks = Int(number(row["chunks"])); compressed = number(row["compressed"]) != 0
         createdAt = string(row["created_at"]); self.tags = tags
+        objectID = row["object_id"] == nil ? id : number(row["object_id"])
+        versionNumber = Int(number(row["version_number"] ?? 1)); versionCount = Int(number(row["version_count"] ?? 1))
+        updatedAt = string(row["updated_at"]); deleted = number(row["deleted"]) != 0; syncPaused = number(row["sync_paused"]) != 0
     }
 }
 
@@ -23,17 +32,26 @@ final class Database {
     private var handle: OpaquePointer?
     let url: URL
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-    init(directory: URL) throws {
+    init(directory: URL, recover: ((Database) throws -> Void)? = nil) throws {
         try Paths.privateDirectory(directory)
         url = directory.appendingPathComponent("index.db")
         guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else { throw TASError("无法打开文件索引") }
         do {
             sqlite3_busy_timeout(handle, 5000)
+            // Persistent triggers reference this connection-local capability. Old clients
+            // cannot prepare writes, even when they disable foreign keys.
+            guard sqlite3_create_function_v2(handle, "tas_history_writer", 0, SQLITE_UTF8, nil, { context, _, _ in
+                sqlite3_result_int(context, 1)
+            }, nil, nil, nil) == SQLITE_OK else { throw error }
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            try script("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            try script("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;")
+            // Reconcile before schema migration/adoption can perform any writes.
+            try recover?(self)
             guard let schema = Self.schemaURL else { throw TASError("缺少索引结构资源") }
             try script(String(contentsOf: schema, encoding: .utf8))
             try migrate()
+            try versionSchema()
+            try script("CREATE TABLE IF NOT EXISTS manifest_journal(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL)")
         } catch { sqlite3_close(handle); handle = nil; throw error }
     }
     private static var schemaURL: URL? {
@@ -115,7 +133,7 @@ final class Database {
         try require(status == SQLITE_DONE && finish == SQLITE_OK, "索引备份失败")
     }
     private func migrate() throws {
-        let additions = [("chunks", "bot_id", "TEXT"), ("pending_chunks", "bot_id", "TEXT"), ("pending_chunks", "size", "INTEGER NOT NULL DEFAULT 0"), ("pending_uploads", "stored_size", "INTEGER NOT NULL DEFAULT 0"), ("pending_uploads", "compressed", "INTEGER NOT NULL DEFAULT 0")]
+        let additions = [("chunks", "bot_id", "TEXT"), ("pending_chunks", "bot_id", "TEXT"), ("pending_chunks", "size", "INTEGER NOT NULL DEFAULT 0"), ("pending_uploads", "stored_size", "INTEGER NOT NULL DEFAULT 0"), ("pending_uploads", "compressed", "INTEGER NOT NULL DEFAULT -1")]
         var changes: [String] = []
         for (table, column, definition) in additions {
             if !(try rows("PRAGMA table_info(\(table))")).contains(where: { string($0["name"]) == column }) { changes.append("ALTER TABLE \(table) ADD COLUMN \(column) \(definition)") }
@@ -149,41 +167,18 @@ final class Database {
             try require(try rows("PRAGMA foreign_key_check").isEmpty, "索引包含失效的关联记录")
         }
     }
-    func files(search: String = "", tag: String? = nil) throws -> [StoredFile] {
-        var sql = "SELECT * FROM files WHERE instr(lower(filename),lower(?))>0"; var params: [Any?] = [search]
-        if let tag { sql += " AND id IN (SELECT file_id FROM tags WHERE tag=?)"; params.append(tag) }
-        return try rows(sql + " ORDER BY filename COLLATE NOCASE", params).map { row in
+    func files(search: String = "", tag: String? = nil, includeDeleted: Bool = false) throws -> [StoredFile] {
+        try adoptLegacyObjects()
+        var sql = "SELECT o.*,l.id,l.filename,l.created_at,l.updated_at,l.deleted,l.sync_paused,v.object_id,v.number AS version_number,(SELECT COUNT(*) FROM file_versions WHERE file_id=l.id) AS version_count FROM logical_files l JOIN file_versions v ON v.id=l.current_version_id JOIN files o ON o.id=v.object_id WHERE instr(lower(l.filename),lower(?))>0"; var params: [Any?] = [search]
+        if !includeDeleted { sql += " AND l.deleted=0" }
+        if let tag { sql += " AND l.id IN (SELECT file_id FROM tags WHERE tag=?)"; params.append(tag) }
+        return try rows(sql + " ORDER BY l.filename COLLATE NOCASE", params).map { row in
             StoredFile(row, tags: try rows("SELECT tag FROM tags WHERE file_id=? ORDER BY tag", [row["id"]]).map { string($0["tag"]) })
         }
     }
     func manifest(includeShares: Bool = false) throws -> JSON {
-        var result: JSON = ["schemaVersion": 1, "createdAt": timestamp(), "files": try rows("SELECT * FROM files ORDER BY id"), "chunks": try rows("SELECT * FROM chunks ORDER BY file_id,chunk_index"), "tags": try rows("SELECT * FROM tags ORDER BY id")]
+        var result: JSON = ["schemaVersion": 2, "logicalFiles": try rows("SELECT * FROM logical_files ORDER BY id"), "versions": try rows("SELECT * FROM file_versions ORDER BY id"), "createdAt": timestamp(), "files": try rows("SELECT * FROM files ORDER BY id"), "chunks": try rows("SELECT * FROM chunks ORDER BY file_id,chunk_index"), "tags": try rows("SELECT * FROM tags ORDER BY id")]
         if includeShares { result["shares"] = try rows("SELECT * FROM shares") }
         return result
-    }
-    func importManifest(_ manifest: JSON) throws {
-        try require(number(manifest["schemaVersion"]) == 1, "不支持的恢复索引版本")
-        guard let files = manifest["files"] as? [JSON], let chunks = manifest["chunks"] as? [JSON] else { throw TASError("恢复索引格式错误") }
-        let ids = Set(files.map { number($0["id"]) })
-        let chunksByFile = Dictionary(grouping: chunks) { number($0["file_id"]) }
-        try require(ids.count == files.count && ids.allSatisfy { $0 > 0 }, "恢复索引文件编号无效")
-        for file in files {
-            _ = try Paths.logical(string(file["filename"]))
-            let owned = (chunksByFile[number(file["id"])] ?? []).sorted { number($0["chunk_index"]) < number($1["chunk_index"]) }
-            try require(owned.count == Int(number(file["chunks"])) && !owned.isEmpty && owned.count <= 65535, "恢复索引分块不完整")
-            try require(owned.enumerated().allSatisfy { number($0.element["chunk_index"]) == Int64($0.offset) && !string($0.element["file_telegram_id"]).isEmpty }, "恢复索引分块编号无效")
-            try require(number(file["original_size"]) >= 0 && string(file["hash"]).count == 64, "恢复索引文件信息无效")
-        }
-        try require(chunks.allSatisfy { ids.contains(number($0["file_id"])) }, "恢复索引包含无主分块")
-        try transaction {
-            try script("DELETE FROM shares; DELETE FROM tags; DELETE FROM chunks; DELETE FROM files;")
-            for (table, records) in [("files", files), ("chunks", chunks), ("tags", manifest["tags"] as? [JSON] ?? []), ("shares", manifest["shares"] as? [JSON] ?? [])] {
-                let allowed = Set(try rows("PRAGMA table_info(\(table))").map { string($0["name"]) })
-                for record in records {
-                    let columns = record.keys.filter { allowed.contains($0) }.sorted()
-                    try run("INSERT INTO \(table) (\(columns.joined(separator: ","))) VALUES (\(Array(repeating: "?", count: columns.count).joined(separator: ",")))", columns.map { record[$0] })
-                }
-            }
-        }
     }
 }
