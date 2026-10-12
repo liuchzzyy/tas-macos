@@ -13,7 +13,7 @@ struct DashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(L10n.tr("概览")).font(LibraryStyle.pageTitle).accessibilityAddTraits(.isHeader)
@@ -124,19 +124,19 @@ struct DashboardView: View {
     }
 
     private func metric(_ title: String, value: String, detail: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 17)).foregroundStyle(TASDesign.accent)
-                .frame(width: 36, height: 36)
+                .frame(width: 28, height: 28)
                 .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 9))
             Text(title).font(LibraryStyle.helper).foregroundStyle(.secondary)
             Text(value).font(.system(size: 25, weight: .semibold, design: .rounded))
                 .monospacedDigit().minimumScaleFactor(0.7).lineLimit(1)
-            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .frame(height: 164, alignment: .topLeading)
+        .padding(14)
+        .frame(height: 144, alignment: .topLeading)
         .background(TASDesign.surface, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TASDesign.border))
         .accessibilityElement(children: .combine)

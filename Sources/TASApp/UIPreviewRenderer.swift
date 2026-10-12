@@ -2,6 +2,31 @@
 import AppKit
 import SwiftUI
 
+struct UIPreviewOptions {
+    let width: Int
+    let height: Int
+    let section: String
+    enum InvalidOption: Error { case value(String) }
+    init(arguments: [String]) throws {
+        func value(_ flag: String) throws -> String? {
+            guard let index = arguments.firstIndex(of: flag) else { return nil }
+            guard arguments.indices.contains(index + 1) else { throw InvalidOption.value(flag) }
+            return arguments[index + 1]
+        }
+        func dimension(_ flag: String, fallback: Int) throws -> Int {
+            guard let raw = try value(flag) else { return fallback }
+            guard let number = Int(raw), (320...4096).contains(number) else { throw InvalidOption.value(flag) }
+            return number
+        }
+        width = try dimension("--ui-width", fallback: 1120)
+        height = try dimension("--ui-height", fallback: 760)
+        section = try value("--ui-section") ?? (arguments.contains("--ui-preview-sync") ? "sync" : arguments.contains("--ui-preview-versions") ? "versions" : "overview")
+        guard ["overview", "files", "deleted", "transfers", "sync", "versions", "settings"].contains(section) else {
+            throw InvalidOption.value("--ui-section")
+        }
+    }
+}
+
 /// Isolated, compile-time-only preview of the actual workspace views. No vault
 /// is opened and all vault operations remain disabled. Not in release builds.
 @MainActor enum UIPreviewRenderer {
@@ -9,7 +34,10 @@ import SwiftUI
         guard let index = CommandLine.arguments.firstIndex(of: "--ui-render"),
               CommandLine.arguments.indices.contains(index + 1) else { return false }
         let destination = URL(fileURLWithPath: CommandLine.arguments[index + 1])
-        let size = NSSize(width: 1120, height: 760)
+        let options: UIPreviewOptions
+        do { options = try UIPreviewOptions(arguments: CommandLine.arguments) }
+        catch { fputs("Invalid preview options: \(error)\n", stderr); exit(5) }
+        let size = NSSize(width: options.width, height: options.height)
         let root = RootView().environmentObject(AppModel())
             .frame(width: size.width, height: size.height)
             .tint(TASDesign.accent)

@@ -14,11 +14,12 @@ enum LibraryStyle {
 
 struct LibrarySurface<Content: View>: View {
     @ObservedObject private var preferences = AppPreferences.shared
+    var padding: CGFloat = 20
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         content()
-            .padding(20)
+            .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(LibraryStyle.surface, in: RoundedRectangle(cornerRadius: 14))
             .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(LibraryStyle.hairline) }

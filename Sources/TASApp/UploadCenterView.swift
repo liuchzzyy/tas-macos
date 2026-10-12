@@ -6,10 +6,10 @@ struct UploadCenterView: View {
     @ObservedObject private var preferences = AppPreferences.shared
     @EnvironmentObject private var model: AppModel
     var body: some View {
-        LibrarySurface {
+        LibrarySurface(padding: 16) {
             VStack(alignment: .leading, spacing: 13) {
                 HStack {
-                    Label(L10n.tr("文件同步"), systemImage: "tray.and.arrow.up").font(LibraryStyle.sectionTitle)
+                    Label(L10n.tr("文件上传"), systemImage: "tray.and.arrow.up").font(LibraryStyle.sectionTitle)
                     Spacer()
                     Button(L10n.tr("上传文件…"), systemImage: "doc.badge.plus") { model.chooseUpload() }
                         .keyboardShortcut("u").buttonStyle(.borderedProminent)
@@ -52,16 +52,19 @@ struct UploadDropZone: View {
     let kind: UploadKind
     @State private var targeted = false
     var body: some View {
-        VStack(spacing: 7) {
+        HStack(spacing: 12) {
             Image(systemName: kind == .folders ? "folder.badge.plus" : "doc.badge.plus")
-                .font(.title2).foregroundStyle(.tint)
-            Text(kind == .folders ? L10n.tr("拖入文件夹，一次性上传") : L10n.tr("将文件拖到这里"))
-                .font(LibraryStyle.body)
-            Text(kind == .folders ? L10n.tr("保留目录层级；不添加持续同步任务。仅接受文件夹。") : L10n.tr("仅接受文件；请将文件夹拖入下方文件夹区域。"))
-                .font(LibraryStyle.helper).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .font(.title2).foregroundStyle(TASDesign.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(kind == .folders ? L10n.tr("拖入文件夹，一次性上传") : L10n.tr("将文件拖到这里"))
+                    .font(LibraryStyle.body)
+                Text(kind == .folders ? L10n.tr("保留目录层级；跳过隐藏项，不保存空目录，不加入持续同步。") : L10n.tr("仅接受普通文件"))
+                    .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
         }
-        .padding(14).frame(maxWidth: .infinity)
+        .padding(12).frame(maxWidth: .infinity, minHeight: 64)
         .background(targeted ? TASDesign.selected : TASDesign.dropZone, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(targeted ? TASDesign.accent : TASDesign.dropBorder, style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: [6])))
         .contentShape(Rectangle())

@@ -10,18 +10,17 @@ struct FileHierarchyView: View {
     let search: String
     let editTags: (StoredFile) -> Void
     @State private var expanded: Set<String> = []
+    @State private var projection = LibraryProjection()
 
     var body: some View {
-        let roots = LibraryTree.build(files)
-        let rows = LibraryTree.visibleRows(roots, expanded: expanded, expandAll: !search.isEmpty)
+        let rows = projection.rows
         VStack(spacing: 8) {
             HStack(spacing: 12) {
                 Label(search.isEmpty ? L10n.tr("按文件夹浏览") : L10n.tr("搜索结果 · 已展开路径"), systemImage: "folder")
                     .font(LibraryStyle.helper).foregroundStyle(.secondary)
                 Spacer()
                 Button(L10n.tr("全部展开")) {
-                    expanded = Set(LibraryTree.visibleRows(roots, expanded: [], expandAll: true)
-                        .filter { $0.node.isFolder }.map { $0.node.path })
+                    expanded = projection.folderPaths
                 }.disabled(!search.isEmpty)
                 Button(L10n.tr("全部折叠")) { expanded = []; model.selectedFileID = nil }.disabled(!search.isEmpty)
             }.controlSize(.small)
@@ -84,6 +83,16 @@ struct FileHierarchyView: View {
             .onChange(of: rows.map(\.id)) { _, ids in
                 if let id = model.selectedFileID, !ids.contains("file:\(id)") { model.selectedFileID = nil }
             }
+        }
+        .onChange(of: files, initial: true) { _, _ in updateProjection() }
+        .onChange(of: expanded) { _, _ in updateProjection() }
+        .onChange(of: search.isEmpty) { _, _ in updateProjection() }
+    }
+
+    private func updateProjection() {
+        projection.update(files: files, expanded: expanded, expandAll: !search.isEmpty)
+        if let id = model.selectedFileID, !projection.rows.contains(where: { $0.node.file?.id == id }) {
+            model.selectedFileID = nil
         }
     }
 

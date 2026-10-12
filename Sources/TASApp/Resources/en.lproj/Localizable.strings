@@ -355,3 +355,10 @@
 "暂未获取" = "Unavailable";
 "未能核实最新 CLI 版本，请查看 Release。" = "Could not verify the latest CLI version. Check the Release.";
 "持续同步需单独添加同步目录；拖拽文件夹只上传一次，不会自动添加。隐藏项会跳过，空文件夹不保存。" = "Add a sync folder separately for continuous sync. Dropping a folder uploads it once, without enrolling it. Hidden items are skipped; empty folders are not stored.";
+"仅保留最近 %@ 条记录；较早记录已移除 %@ 条。" = "Keeping the latest %@ entries; %@ older entries removed.";
+"此条记录过长，已截断。" = "This entry was too long and has been truncated.";
+"文件上传" = "File upload";
+"文件夹上传 · 一次性" = "Folder upload · One-time";
+"持续同步" = "Continuous sync";
+"保留目录层级；跳过隐藏项，不保存空目录，不加入持续同步。" = "Keeps folder paths; skips hidden items and empty folders. No continuous sync.";
+"仅接受普通文件" = "Regular files only";

@@ -20,7 +20,7 @@ struct VersionManagementView: View {
 
     private var preview: Bool {
         #if TAS_UI_PREVIEW
-        CommandLine.arguments.contains("--ui-preview") || CommandLine.arguments.contains("--ui-preview-versions") || CommandLine.arguments.contains("--ui-preview-sync")
+        true
         #else
         false
         #endif
@@ -91,6 +91,7 @@ struct VersionManagementView: View {
         }
         .tasCanvas()
         .onAppear {
+            guard !preview else { cliProbePending = false; return }
             Task.detached(priority: .utility) {
                 let output = EmbeddedCLIVersionProbe.read(from: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/tas"))
                 await MainActor.run {

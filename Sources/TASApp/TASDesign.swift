@@ -3,11 +3,18 @@ import SwiftUI
 
 /// Adaptive, layered workspace colors: light canvas is no longer system gray.
 enum TASDesign {
-    static let accent = Color(red: 0.15, green: 0.48, blue: 0.40)
+    static let accent = Color(nsColor: NSColor(name: "TASBrandGreen") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.36, green: 0.76, blue: 0.63, alpha: 1)
+            : NSColor(srgbRed: 0.15, green: 0.48, blue: 0.40, alpha: 1)
+    })
     static let sidebar = Color(nsColor: .windowBackgroundColor)
     static let canvas = Color(nsColor: .windowBackgroundColor)
     static let surface = Color(nsColor: .textBackgroundColor)
-    static let border = Color(nsColor: .separatorColor)
+    static let border = Color(nsColor: NSColor(name: "TASCardBorder") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.20) : NSColor(white: 0, alpha: 0.12)
+    })
     static let dropBorder = accent.opacity(0.40)
     static let selected = accent.opacity(0.13)
     static let dropZone = accent.opacity(0.055)
