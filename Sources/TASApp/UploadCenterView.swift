@@ -62,8 +62,8 @@ struct UploadDropZone: View {
                 .multilineTextAlignment(.center)
         }
         .padding(14).frame(maxWidth: .infinity)
-        .background(targeted ? TASDesign.selected : TASDesign.canvas, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(targeted ? TASDesign.accent : TASDesign.border, style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: [6])))
+        .background(targeted ? TASDesign.selected : TASDesign.dropZone, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(targeted ? TASDesign.accent : TASDesign.dropBorder, style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: [6])))
         .contentShape(Rectangle())
         .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { model.acceptUploadDrop($0, kind: kind) }
         .accessibilityElement(children: .combine)

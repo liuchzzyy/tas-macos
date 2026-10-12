@@ -195,7 +195,7 @@ struct VersionHistoryView: View {
                 }.buttonStyle(.borderedProminent).disabled(!model.canOperate || selection == nil || file == nil)
             }
         }.padding(24).frame(width: 800, height: 660)
-        .background(LibraryStyle.canvas)
+        .tasCanvas()
         .interactiveDismissDisabled(model.busy || model.presentingDialog)
         .onChange(of: model.historyVersions) { _, _ in
             if !versions.contains(where: { $0.id == selected }) { selected = versions.first?.id }

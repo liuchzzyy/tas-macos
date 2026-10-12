@@ -107,7 +107,7 @@ struct DashboardView: View {
             .padding(30)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .background(TASDesign.canvas)
+        .tasCanvas()
     }
 
     private func sectionHeading(_ title: String, icon: String) -> some View {

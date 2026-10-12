@@ -123,17 +123,17 @@ import TASCore
             }
         }
     }
-    func chooseUpload(folders: Bool = false) {
+    func chooseUpload() {
         guard canOperate, historyFile == nil else { return }
         presentingDialog = true
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = folders; panel.canChooseFiles = !folders
-        panel.prompt = folders ? L10n.tr("选择文件夹") : L10n.tr("选择文件")
-        panel.message = folders ? L10n.tr("一次性上传，保留文件夹名称和层级；不添加自动同步。") : L10n.tr("选择要上传的文件。")
+        panel.canChooseDirectories = false; panel.canChooseFiles = true
+        panel.prompt = L10n.tr("选择文件")
+        panel.message = L10n.tr("选择要上传的文件。")
         let response = panel.runModal()
         presentingDialog = false
         if response == .OK {
-            do { try (folders ? UploadKind.folders : .files).validate(panel.urls); upload(panel.urls) }
+            do { try UploadKind.files.validate(panel.urls); upload(panel.urls) }
             catch { notice = error.localizedDescription }
         }
     }
@@ -379,7 +379,7 @@ struct RootView: View {
                                 Button(L10n.tr("取消")) { model.cancel() }.controlSize(.small)
                             }
                         }.padding(.horizontal, 22).frame(height: 43)
-                    }.background(TASDesign.canvas)
+                    }.tasCanvas()
     }
 
     private func sidebarItem(_ title: String, icon: String, id: String) -> some View {
@@ -546,7 +546,7 @@ struct LibraryView: View {
                 }
             }
         }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(TASDesign.canvas)
+        .tasCanvas()
         .onChange(of: filtered.map(\.id)) { _, ids in if let id = model.selectedFileID, !ids.contains(id) { model.selectedFileID = nil } }
         .onDisappear { model.selectedFileID = nil }
         .sheet(item: $tagging, onDismiss: { model.presentingDialog = false }) { target in
@@ -618,7 +618,7 @@ struct TransfersView: View {
                     }
                 }
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
-        }.background(LibraryStyle.canvas)
+        }.tasCanvas()
     }
     private func clear(_ item: PendingUpload) {
         let alert = NSAlert(); alert.messageText = L10n.tr("清除“%@”的上传任务？", String(describing: item.filename)); alert.informativeText = L10n.tr("已暂存的加密分块将被移除，之后需要重新上传源文件。"); alert.addButton(withTitle: L10n.tr("清除")); alert.addButton(withTitle: L10n.tr("取消"))
@@ -647,9 +647,7 @@ struct SyncView: View {
                         }
                         Divider()
                         UploadDropZone(kind: .folders)
-                        Button(L10n.tr("一次性上传文件夹…"), systemImage: "folder.badge.plus") { model.chooseUpload(folders: true) }
-                            .disabled(!model.canOperate || model.historyFile != nil)
-                        Text(L10n.tr("持续同步需单独添加同步目录；拖拽或上传文件夹不会自动添加。隐藏项会跳过，空文件夹不保存。"))
+                        Text(L10n.tr("持续同步需单独添加同步目录；拖拽文件夹只上传一次，不会自动添加。隐藏项会跳过，空文件夹不保存。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary)
                         if model.folders.isEmpty { Text(L10n.tr("尚未添加同步目录")).font(LibraryStyle.body).foregroundStyle(.secondary) }
                         ForEach(model.folders) { folder in
@@ -678,7 +676,7 @@ struct SyncView: View {
                 }
 
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
-        }.background(LibraryStyle.canvas)
+        }.tasCanvas()
     }
 }
 struct SettingsView: View {
@@ -747,7 +745,7 @@ struct SettingsView: View {
                     }
                 }
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
-        }.background(LibraryStyle.canvas)
+        }.tasCanvas()
             .sheet(isPresented: $addingBot) { AddBotView() }.sheet(item: $editingBot) { bot in EndpointView(bot: bot) }
     }
     private func rebuild() {

@@ -145,10 +145,8 @@ struct PreferencesControls: View {
     var body: some View {
         HStack(spacing: 8) {
             Menu {
-                Picker(L10n.tr("语言"), selection: $preferences.language) {
-                    Text("简体中文").tag(AppLanguage.chinese)
-                    Text("English").tag(AppLanguage.english)
-                }
+                Button("简体中文") { preferences.language = .chinese }
+                Button("English") { preferences.language = .english }
             } label: {
                 Label(preferences.language == .chinese ? "简体中文" : "English", systemImage: "globe")
             }.menuStyle(.borderlessButton).fixedSize()

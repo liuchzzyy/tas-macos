@@ -352,3 +352,6 @@
 "核心·已删除 %@" = "Deleted %@";
 "核心·已永久清除 %@" = "Permanently erased %@";
 "核心·文件不存在" = "File not found";
+"暂未获取" = "Unavailable";
+"未能核实最新 CLI 版本，请查看 Release。" = "Could not verify the latest CLI version. Check the Release.";
+"持续同步需单独添加同步目录；拖拽文件夹只上传一次，不会自动添加。隐藏项会跳过，空文件夹不保存。" = "Add a sync folder separately for continuous sync. Dropping a folder uploads it once, without enrolling it. Hidden items are skipped; empty folders are not stored.";

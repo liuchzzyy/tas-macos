@@ -12,6 +12,8 @@ struct VersionManagementView: View {
     @State private var status: String?
     @State private var release: ReleaseUpdate?
     @State private var latestVersion: String?
+    @State private var latestCLI: String?
+    @State private var checkedCLI = false
     @State private var releaseNotes: String?
     @State private var cliVersion: String?
     @State private var cliProbePending = true
@@ -39,7 +41,7 @@ struct VersionManagementView: View {
                 versionCard(title: L10n.tr("桌面客户端 (GUI)"), icon: "macwindow", installed: guiVersion,
                             latest: latestVersion, detail: L10n.tr("TAS.app · 图形界面"))
                 versionCard(title: L10n.tr("命令行工具 (CLI)"), icon: "terminal", installed: versions.cli ?? (cliProbePending ? L10n.tr("检测中…") : L10n.tr("未检测到")),
-                            latest: nil, detail: L10n.tr("内置 tas · 独立版本号，随应用包分发"))
+                            latest: latestCLI, checked: checkedCLI, detail: L10n.tr("内置 tas · 独立版本号，随应用包分发"))
                 LibrarySurface {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -52,6 +54,10 @@ struct VersionManagementView: View {
                         if checking { ProgressView(L10n.tr("正在查询 GitHub Release…")).controlSize(.small) }
                         if installing { ProgressView(L10n.tr("正在下载并校验安装包…")).controlSize(.small) }
                         if let status { Text(L10n.current(status)).font(LibraryStyle.body).foregroundStyle(.secondary) }
+                        if checkedCLI && latestCLI == nil {
+                            Text(L10n.tr("未能核实最新 CLI 版本，请查看 Release。"))
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                        }
                         if let release, !cliProbePending {
                             HStack {
                                 Button(L10n.tr("更新 TAS 至 %@…", String(describing: release.version))) { Task { await install(release) } }
@@ -83,7 +89,7 @@ struct VersionManagementView: View {
             .frame(maxWidth: 1050, alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .background(TASDesign.canvas)
+        .tasCanvas()
         .onAppear {
             Task.detached(priority: .utility) {
                 let output = EmbeddedCLIVersionProbe.read(from: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/tas"))
@@ -96,7 +102,7 @@ struct VersionManagementView: View {
         }
     }
 
-    private func versionCard(title: String, icon: String, installed: String, latest: String?, detail: String) -> some View {
+    private func versionCard(title: String, icon: String, installed: String, latest: String?, checked: Bool = false, detail: String) -> some View {
         LibrarySurface {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
@@ -112,7 +118,7 @@ struct VersionManagementView: View {
                 HStack(spacing: 0) {
                     versionValue(L10n.tr("当前版本"), installed)
                     Divider().frame(height: 42)
-                    versionValue(L10n.tr("最新版本"), latest ?? (icon == "terminal" ? L10n.tr("以安装包为准") : L10n.tr("待检查")))
+                    versionValue(L10n.tr("最新版本"), latest ?? (checked ? L10n.tr("暂未获取") : L10n.tr("待检查")))
                 }
             }
         }
@@ -126,7 +132,7 @@ struct VersionManagementView: View {
     }
     private func check() async {
         guard !checking, !preview else { return }
-        checking = true; status = nil; release = nil; latestVersion = nil; releaseNotes = nil
+        checking = true; status = nil; release = nil; latestVersion = nil; latestCLI = nil; checkedCLI = false; releaseNotes = nil
         defer { checking = false }
         do {
             var request = URLRequest(url: URL(string: "https://api.github.com/repos/liuchzzyy/tas-macos/releases/latest")!)
@@ -139,10 +145,15 @@ struct VersionManagementView: View {
             }
             let latest = try ReleaseUpdate(data: data)
             latestVersion = latest.version
+            // A GUI release tag does not imply a CLI version. Fetch the tagged
+            // package declaration independently; show unavailable on failure.
+            do { latestCLI = try await ReleaseCLIVersion.fetch(tag: latest.tag, guiVersion: latest.version) }
+            catch { latestCLI = nil }
+            checkedCLI = true
             releaseNotes = (try? JSONDecoder().decode(ReleaseNotes.self, from: data))?.body
             release = latest
             updateDecision(for: latest.version)
-        } catch { status = L10n.tr("检查更新失败：%@", String(describing: error.localizedDescription)); release = nil; latestVersion = nil; releaseNotes = nil }
+        } catch { status = L10n.tr("检查更新失败：%@", String(describing: error.localizedDescription)); release = nil; latestVersion = nil; latestCLI = nil; checkedCLI = false; releaseNotes = nil }
     }
     private func updateDecision(for latest: String) {
         guard let checkedRelease = release, checkedRelease.version == latest else {

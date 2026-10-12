@@ -43,6 +43,8 @@ class WorkspaceUIContractTests(unittest.TestCase):
         self.assertNotIn("在其他 Mac 上取回文件", sync)
         self.assertIn('Button(L10n.tr("恢复全部文件…"))', sync)
         self.assertNotIn(".onDrop", sync, "Only dedicated zones may accept drops")
+        self.assertNotIn("一次性上传文件夹…", sync, "The redundant one-time folder picker must be removed")
+        self.assertNotIn("chooseUpload(folders:", (APP / "TASApp.swift").read_text())
         self.assertIn("UploadDropZone(kind: .folders)", sync)
         center = (APP / "UploadCenterView.swift").read_text()
         self.assertIn("上传文件", center)
@@ -69,6 +71,23 @@ class WorkspaceUIContractTests(unittest.TestCase):
         self.assertNotIn(".id(preferences", text)
         self.assertIn("L10n.botName(bot.id)", text)
         self.assertIn("Color(nsColor:", (APP / "TASDesign.swift").read_text())
+
+    def test_language_menu_is_one_level_and_light_canvas_is_distinct(self):
+        controls = (APP / "AppPreferences.swift").read_text().split("struct PreferencesControls:", 1)[1]
+        self.assertNotIn('Picker(L10n.tr("语言")', controls)
+        self.assertIn('Button("简体中文")', controls)
+        self.assertIn('Button("English")', controls)
+        design = (APP / "TASDesign.swift").read_text()
+        self.assertNotIn('underPageBackgroundColor', design)
+        self.assertIn('@Environment(\\.colorScheme)', design)
+        self.assertIn('dropZone', design)
+
+    def test_cli_latest_version_comes_from_independent_release_metadata(self):
+        versions = (APP / "VersionManagementView.swift").read_text()
+        self.assertIn('latestCLI', versions)
+        self.assertNotIn('以安装包为准', versions)
+        self.assertIn('ReleaseCLIVersion', versions)
+        self.assertIn('TASCLIVersion', (APP / "ReleaseCLIVersion.swift").read_text() if (APP / "ReleaseCLIVersion.swift").exists() else '')
 
     def test_settings_has_no_duplicate_software_version_surface(self):
         settings = section("struct SettingsView:", "struct AddBotView:")
