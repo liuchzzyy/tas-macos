@@ -115,6 +115,24 @@ open dist/TAS.app
 
 `swift test -c release` 也可在装有 SQLite/zlib 开发库的 Linux + Swift 6 上运行核心测试；SwiftUI 应用必须在 macOS 构建。正式签名可设置 `TAS_SIGN_IDENTITY`；公证凭据不包含在仓库中。
 
+## 构建与清理
+
+`scripts/cleanup.sh` 默认只做 dry-run，打印将要处理的对象：
+
+```sh
+./scripts/cleanup.sh                  # 预览：构建缓存、多余 worktree、旧更新备份、过期 DMG
+./scripts/cleanup.sh --apply           # 执行；删除项一律移入废纸篓，可恢复
+./scripts/cleanup.sh --apply --build   # 同时删除 SwiftPM 构建缓存（.build/.swiftpm，可重新生成）
+./scripts/cleanup.sh --apply --dist    # 同时移走版本号已过期的 dist/TAS-*.dmg
+```
+
+规则与边界：
+
+- 文件库数据（`~/.tas`）、数据库迁移备份（`index-before-versions-*.db`）以及**最新一个** `/Applications/.TAS-backup-*.app` 永不删除——后者是已安装应用唯一的回滚副本。
+- worktree 只在工作区干净时移除；有未提交改动的会被保留并报告。
+- 移入废纸篓不等于释放磁盘；确认无误后自行清空废纸篓。
+- 检查中间产物或预览构建时，用 `swift build --scratch-path <临时目录>` 把构建产物放在源码树之外；这些目录也可随时整目录移入废纸篓。
+
 ## 命令行
 
 安装后的命令行位于：

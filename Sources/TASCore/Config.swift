@@ -54,11 +54,13 @@ final class Configuration {
         try Paths.atomicWrite(jsonData(config), to: directory.appendingPathComponent("config.json"))
     }
     func save() throws { try Paths.atomicWrite(jsonData(raw), to: url) }
-    func saveBots(password: String, replacing proposedBots: [Bot]? = nil) throws {
-        let proposedBots = proposedBots ?? bots
+    /// Commit the proposed bot list only after the new config is durable: the
+    /// caller's in-memory list and `raw` stay untouched when the write fails.
+    func saveBots(password: String, replacing replacement: [Bot]? = nil) throws {
+        let botsToSave = replacement ?? bots
         var candidate = raw
         candidate["configVersion"] = 3
-        candidate["bots"] = try proposedBots.map { bot -> JSON in
+        candidate["bots"] = try botsToSave.map { bot -> JSON in
             var entry = bot.raw; entry.removeValue(forKey: "botToken")
             if entry["encryptedBotToken"] == nil { entry["encryptedBotToken"] = try Crypto.encrypt(Data(bot.token.utf8), password: password).base64EncodedString() }
             return entry
@@ -66,7 +68,7 @@ final class Configuration {
         for key in ["botToken", "encryptedBotToken", "chatId", "username", "customApiUrl"] { candidate.removeValue(forKey: key) }
         try Paths.atomicWrite(jsonData(candidate), to: url)
         raw = candidate
-        bots = proposedBots
+        bots = botsToSave
     }
     func owner(_ id: String?) throws -> Bot {
         if let id, !id.isEmpty, let bot = bots.first(where: { $0.id == id }) { return bot }

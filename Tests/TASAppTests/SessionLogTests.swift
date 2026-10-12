@@ -27,4 +27,25 @@ final class SessionLogTests: XCTestCase {
         XCTAssertTrue(log.entries[0].truncated)
         XCTAssertEqual(log.capacity, 500)
     }
+    func testMultiByteGraphemesAreBoundedByBytesWithoutSplitting() {
+        var log = SessionLog()
+        let cluster = "👩‍👩‍👧‍👦"
+        log.append(String(repeating: cluster, count: 4000))
+        let entry = log.entries[0]
+        XCTAssertLessThanOrEqual(entry.message.utf8.count, SessionLog.byteLimit)
+        XCTAssertLessThanOrEqual(entry.message.count, SessionLog.messageLimit)
+        XCTAssertTrue(entry.truncated)
+        XCTAssertEqual(String(entry.message.prefix(1)), cluster, "Truncation must not split a grapheme cluster")
+    }
+    func testMessagesWithinBothLimitsAreNotMarkedTruncated() {
+        var log = SessionLog()
+        log.append("")
+        XCTAssertEqual(log.entries[0].message, "")
+        XCTAssertFalse(log.entries[0].truncated)
+        log.append(String(repeating: "a", count: SessionLog.messageLimit))
+        XCTAssertEqual(log.entries[0].message.count, SessionLog.messageLimit)
+        XCTAssertFalse(log.entries[0].truncated)
+        log.append(String(repeating: "a", count: SessionLog.messageLimit + 1))
+        XCTAssertTrue(log.entries[0].truncated)
+    }
 }

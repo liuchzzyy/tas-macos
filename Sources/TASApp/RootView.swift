@@ -102,8 +102,7 @@ struct RootView: View {
                             .accessibilityLabel(model.vault == nil ? L10n.tr("文件库未连接") : L10n.tr("锁定文件库"))
                         }
                         .padding(12)
-                        .background(TASDesign.surface, in: RoundedRectangle(cornerRadius: 11))
-                        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(TASDesign.border))
+                        .tasCard(cornerRadius: 11)
                         .padding(.horizontal, 13)
                         .padding(.bottom, 13)
                         Divider().padding(.horizontal, 18)
@@ -135,7 +134,7 @@ struct RootView: View {
                             Text(model.vault == nil && isolatedUIPreview ? L10n.tr("界面预览 · 未连接文件库") : L10n.current(model.progress.message)).font(.caption).lineLimit(1)
                             Spacer()
                             if model.busy {
-                                if let fraction = model.progress.fraction { ProgressView(value: fraction).frame(width: 130) }
+                                if let fraction = model.progress.fraction { ProgressView(value: fraction).frame(minWidth: 80, maxWidth: 150) }
                                 Button(L10n.tr("取消")) { model.cancel() }.controlSize(.small)
                             }
                         }.padding(.horizontal, 22).frame(height: 43)

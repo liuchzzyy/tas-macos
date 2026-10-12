@@ -21,8 +21,7 @@ struct LibrarySurface<Content: View>: View {
         content()
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LibraryStyle.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(LibraryStyle.hairline) }
+            .tasCard(cornerRadius: 14)
     }
 }
 #endif

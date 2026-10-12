@@ -59,6 +59,19 @@ final class UpdateTransactionTests: XCTestCase {
         XCTAssertEqual(try version(f.target), "new")
     }
 
+    func testMissingTargetFailsBeforeAnyMove() throws {
+        let f = try fixture()
+        try FileManager.default.removeItem(at: f.target)
+        XCTAssertThrowsError(try UpdateInstallationTransaction.install(staging: f.staging, target: f.target, backup: f.backup, failed: f.failed,
+            verify: { _ in XCTFail("Must not verify without a target") }, launch: { _ in XCTFail("Must not launch") },
+            writeReport: { XCTFail("Must not report success") })) { error in
+            XCTAssertTrue(error.localizedDescription.contains(f.target.path))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.backup.path))
+        XCTAssertEqual(try version(f.staging), "new", "staging stays intact for a retry")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.failed.path))
+    }
+
     func testReportFailureAfterLaunchKeepsRunningNewBundle() throws {
         let f = try fixture()
         var launched = false

@@ -29,8 +29,10 @@ struct DashboardView: View {
                     Text(model.vault == nil ? L10n.tr("界面预览 · 未连接文件库") : L10n.tr("本地文件库已解锁"))
                         .font(.callout.weight(.semibold))
                     Spacer()
+                    // `.secondary` on the tinted banner fell below comfortable
+                    // contrast in light mode; keep the emphasis, keep it legible.
                     Text(model.vault == nil ? L10n.tr("不会读取真实文件或运行操作") : L10n.tr("文件在本机加密后上传"))
-                        .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                        .font(LibraryStyle.helper).foregroundStyle(.primary.opacity(0.8))
                 }
                 .padding(.horizontal, 17).frame(height: 47)
                 .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 11))
@@ -137,8 +139,7 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .frame(height: 144, alignment: .topLeading)
-        .background(TASDesign.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(TASDesign.border))
+        .tasCard(cornerRadius: 14)
         .accessibilityElement(children: .combine)
     }
 }

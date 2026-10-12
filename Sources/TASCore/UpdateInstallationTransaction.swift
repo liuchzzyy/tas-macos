@@ -13,6 +13,11 @@ public enum UpdateInstallationTransaction {
                                writeReport: () throws -> Void,
                                move: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }) throws -> Outcome {
         let fm = FileManager.default
+        // Nothing has been moved yet, so refuse before touching the target: a
+        // missing target must fail cleanly instead of leaving staging behind.
+        guard fm.fileExists(atPath: target.path) else {
+            throw TASError("待更新的应用不存在：\(target.path)")
+        }
         try move(target, backup)
         do {
             try move(staging, target)

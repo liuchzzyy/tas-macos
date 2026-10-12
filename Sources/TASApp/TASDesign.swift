@@ -10,7 +10,14 @@ enum TASDesign {
     })
     static let sidebar = Color(nsColor: .windowBackgroundColor)
     static let canvas = Color(nsColor: .windowBackgroundColor)
-    static let surface = Color(nsColor: .textBackgroundColor)
+    /// Cards must read as raised. The system colors resolve to the same value as
+    /// the canvas in both appearances (white/white in light, 0.118/0.118 in dark),
+    /// so a shared system color would leave surfaces visible only by their border.
+    static let surface = Color(nsColor: NSColor(name: "TASCardSurface") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.165, green: 0.169, blue: 0.169, alpha: 1)
+            : NSColor.white
+    })
     static let border = Color(nsColor: NSColor(name: "TASCardBorder") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(white: 1, alpha: 0.20) : NSColor(white: 0, alpha: 0.12)
@@ -25,7 +32,9 @@ struct TASCanvas: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
             if colorScheme == .light {
-                LinearGradient(colors: [Color(red: 0.97, green: 0.985, blue: 0.98), .white],
+                // Tinted near-white page so white cards keep a readable edge.
+                LinearGradient(colors: [Color(red: 0.945, green: 0.966, blue: 0.956),
+                                        Color(red: 0.984, green: 0.992, blue: 0.988)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
             } else {
                 TASDesign.canvas
@@ -34,8 +43,23 @@ struct TASCanvas: ViewModifier {
     }
 }
 
+/// Shared card elevation: appearance-aware surface, hairline border and a soft
+/// shadow that only darkens what sits below the card.
+struct TASElevation: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let cornerRadius: CGFloat
+    func body(content: Content) -> some View {
+        content
+            .background(TASDesign.surface, in: RoundedRectangle(cornerRadius: cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(TASDesign.border))
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.07),
+                    radius: 7, x: 0, y: 2)
+    }
+}
+
 extension View {
     func tasCanvas() -> some View { modifier(TASCanvas()) }
+    func tasCard(cornerRadius: CGFloat = 15) -> some View { modifier(TASElevation(cornerRadius: cornerRadius)) }
 }
 
 struct TASSectionLabel: View {
@@ -58,8 +82,7 @@ struct TASCard<Content: View>: View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(22)
-            .background(TASDesign.surface, in: RoundedRectangle(cornerRadius: 15))
-            .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(TASDesign.border))
+            .tasCard()
     }
 }
 #endif
