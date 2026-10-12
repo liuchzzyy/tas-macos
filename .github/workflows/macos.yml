@@ -40,7 +40,7 @@ jobs:
       - name: Check disk image
         run: |
           hdiutil verify dist/TAS-1.2.1-arm64.dmg
-          shasum -a 256 -c dist/TAS-1.2.1-arm64.dmg.sha256
+          (cd dist && shasum -a 256 -c TAS-1.2.1-arm64.dmg.sha256)
       - uses: actions/upload-artifact@v4
         with:
           name: TAS-macOS-arm64

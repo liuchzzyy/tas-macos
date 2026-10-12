@@ -27,6 +27,10 @@ class VersionContractTests(unittest.TestCase):
         build = (ROOT / 'scripts/build-macos.sh').read_text()
         self.assertIn('cd dist && shasum -a 256 TAS-1.2.1-arm64.dmg > TAS-1.2.1-arm64.dmg.sha256', build)
 
+    def test_ci_checksum_verification_uses_artifact_directory(self):
+        workflow = (ROOT / '.github/workflows/macos.yml').read_text()
+        self.assertIn('(cd dist && shasum -a 256 -c TAS-1.2.1-arm64.dmg.sha256)', workflow)
+
     def test_installer_uses_signed_cli_declaration(self):
         source = (ROOT / 'Sources/TASApp/UpdateInstaller.swift').read_text()
         self.assertIn('TASCLIVersion', source)
