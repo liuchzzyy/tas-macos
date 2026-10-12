@@ -41,15 +41,34 @@ class WorkspaceUIContractTests(unittest.TestCase):
         sync = section("struct SyncView:", "struct SettingsView:")
         self.assertIn("UploadCenterView()", sync)
         self.assertNotIn("在其他 Mac 上取回文件", sync)
-        self.assertIn('Button("恢复全部文件…")', sync)
-        self.assertIn(".onDrop", sync)
+        self.assertIn('Button(L10n.tr("恢复全部文件…"))', sync)
+        self.assertNotIn(".onDrop", sync, "Only dedicated zones may accept drops")
+        self.assertIn("UploadDropZone(kind: .folders)", sync)
         center = (APP / "UploadCenterView.swift").read_text()
-        self.assertIn("上传文件夹", center)
         self.assertIn("上传文件", center)
-        self.assertIn("chooseNewVersion", center)
+        self.assertIn("UploadDropZone(kind: .files)", center)
+        self.assertNotIn("chooseNewVersion", center)
+        self.assertNotIn("DisclosureGroup", center)
+        self.assertNotIn("chooseNewVersion", (APP / "VersionHistoryView.swift").read_text())
         model = section("final class AppModel:", "final class AppDelegate:")
         self.assertIn("UploadPlan.collect", model)
         self.assertIn("withTaskCancellationHandler", model)
+
+    def test_every_screen_uses_explicit_live_localization(self):
+        for name in ["TASApp.swift", "DashboardView.swift", "FileHierarchyView.swift", "UploadCenterView.swift", "VersionHistoryView.swift", "VersionManagementView.swift"]:
+            text = (APP / name).read_text()
+            self.assertIn("L10n.tr(", text, name)
+            self.assertIn("AppPreferences.shared", text, name)
+        self.assertIn("L10n.tr(", (APP / "UpdateInstaller.swift").read_text())
+
+    def test_live_preferences_and_adaptive_surfaces(self):
+        text = (APP / "TASApp.swift").read_text()
+        self.assertGreaterEqual(text.count("PreferencesControls()"), 2)
+        self.assertIn("preferences.appearance.colorScheme", text)
+        self.assertNotIn(".preferredColorScheme(.light)", text)
+        self.assertNotIn(".id(preferences", text)
+        self.assertIn("L10n.botName(bot.id)", text)
+        self.assertIn("Color(nsColor:", (APP / "TASDesign.swift").read_text())
 
     def test_settings_has_no_duplicate_software_version_surface(self):
         settings = section("struct SettingsView:", "struct AddBotView:")

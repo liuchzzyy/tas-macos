@@ -13,6 +13,7 @@ enum LibraryStyle {
 }
 
 struct LibrarySurface<Content: View>: View {
+    @ObservedObject private var preferences = AppPreferences.shared
     @ViewBuilder let content: () -> Content
 
     var body: some View {

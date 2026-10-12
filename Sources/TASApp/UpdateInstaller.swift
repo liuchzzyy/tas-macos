@@ -27,33 +27,35 @@ enum UpdateInstaller {
         request.timeoutInterval = 60
         let (temporary, response) = try await URLSession.shared.download(for: request)
         guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
-            throw Failure("下载失败；请检查网络及 GitHub Release 是否公开")
+            throw Failure(L10n.tr("下载失败；请检查网络及 GitHub Release 是否公开"))
         }
         let dmg = directory.appendingPathComponent(release.downloadURL.lastPathComponent)
         try fm.moveItem(at: temporary, to: dmg)
         let values = try dmg.resourceValues(forKeys: [.fileSizeKey])
-        guard Int64(values.fileSize ?? -1) == release.expectedSize else { throw Failure("下载文件大小与 Release 不符") }
+        guard Int64(values.fileSize ?? -1) == release.expectedSize else { throw Failure(L10n.tr("下载文件大小与 Release 不符")) }
         let digest = SHA256.hash(data: try Data(contentsOf: dmg, options: .mappedIfSafe))
             .map { String(format: "%02x", $0) }.joined()
-        guard digest == release.expectedSHA256 else { throw Failure("SHA-256 校验失败，更新已取消") }
+        guard digest == release.expectedSHA256 else { throw Failure(L10n.tr("SHA-256 校验失败，更新已取消")) }
 
         let mount = directory.appendingPathComponent("mount", isDirectory: true)
         try fm.createDirectory(at: mount, withIntermediateDirectories: true)
         try run("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount.path, dmg.path],
-                error: "无法挂载已校验的 DMG")
-        defer { try? run("/usr/bin/hdiutil", ["detach", mount.path], error: "卸载 DMG 失败") }
+                error: L10n.tr("无法挂载已校验的 DMG"))
+        defer { try? run("/usr/bin/hdiutil", ["detach", mount.path], error: L10n.tr("卸载 DMG 失败")) }
         let candidate = mount.appendingPathComponent("TAS.app", isDirectory: true)
         let staged = directory.appendingPathComponent("TAS.app", isDirectory: true)
-        try run("/usr/bin/ditto", [candidate.path, staged.path], error: "无法读取 DMG 内的 TAS.app")
+        try run("/usr/bin/ditto", [candidate.path, staged.path], error: L10n.tr("无法读取 DMG 内的 TAS.app"))
         guard let bundle = Bundle(url: staged),
               bundle.bundleIdentifier == "com.liuchzzyy.tas",
               bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String == release.version else {
-            throw Failure("下载的应用标识或版本不符")
+            throw Failure(L10n.tr("下载的应用标识或版本不符"))
         }
-        try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path], error: "下载的应用签名校验失败")
+        try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path], error: L10n.tr("下载的应用签名校验失败"))
         let stagedCLI = staged.appendingPathComponent("Contents/Helpers/tas")
-        guard SoftwareVersions(gui: release.version, cliOutput: EmbeddedCLIVersionProbe.read(from: stagedCLI)).cli == release.version else {
-            throw Failure("下载的 CLI 版本与 Release 不符")
+        let stagedVersions = SoftwareVersions(gui: release.version, cliOutput: EmbeddedCLIVersionProbe.read(from: stagedCLI))
+        let declaredCLI = bundle.object(forInfoDictionaryKey: "TASCLIVersion") as? String
+        guard stagedVersions.matchesBundleDeclaration(gui: release.version, cli: declaredCLI) else {
+            throw Failure(L10n.tr("下载的 CLI 版本与应用包声明不符"))
         }
         let stagedHelper = directory.appendingPathComponent("TASUpdater")
         try fm.copyItem(at: helper, to: stagedHelper)

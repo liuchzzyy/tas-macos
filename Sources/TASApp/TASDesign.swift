@@ -4,14 +4,15 @@ import SwiftUI
 /// Quiet light surfaces shared by the unlocked workspace.
 enum TASDesign {
     static let accent = Color(red: 0.15, green: 0.48, blue: 0.40)
-    static let sidebar = Color(red: 0.956, green: 0.968, blue: 0.970)
-    static let canvas = Color(red: 0.978, green: 0.984, blue: 0.984)
-    static let surface = Color.white
-    static let border = Color(red: 0.87, green: 0.90, blue: 0.91)
-    static let selected = Color(red: 0.92, green: 0.966, blue: 0.951)
+    static let sidebar = Color(nsColor: .windowBackgroundColor)
+    static let canvas = Color(nsColor: .underPageBackgroundColor)
+    static let surface = Color(nsColor: .controlBackgroundColor)
+    static let border = Color(nsColor: .separatorColor)
+    static let selected = accent.opacity(0.13)
 }
 
 struct TASSectionLabel: View {
+    @ObservedObject private var preferences = AppPreferences.shared
     let title: String
     var body: some View {
         Text(title)
@@ -24,6 +25,7 @@ struct TASSectionLabel: View {
 }
 
 struct TASCard<Content: View>: View {
+    @ObservedObject private var preferences = AppPreferences.shared
     @ViewBuilder let content: Content
     var body: some View {
         content

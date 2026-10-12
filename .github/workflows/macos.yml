@@ -19,6 +19,8 @@ jobs:
         run: swift --version
       - name: Compatibility and recovery tests
         run: env SWIFT_BACKTRACE=enable=yes,interactive=no,color=no swift test -c release
+      - name: Independent GUI and CLI version contract
+        run: python3 scripts/test-version-contract.py
       - name: Workspace UI wiring regression tests
         run: python3 scripts/test-workspace-ui.py
       - name: CLI version history end-to-end tests
@@ -37,14 +39,14 @@ jobs:
         run: swift scripts/smoke-gui.swift "$PWD/dist/TAS.app/Contents/MacOS/TAS" "$PWD/dist"
       - name: Check disk image
         run: |
-          hdiutil verify dist/TAS-1.2.0-arm64.dmg
-          shasum -a 256 -c dist/TAS-1.2.0-arm64.dmg.sha256
+          hdiutil verify dist/TAS-1.2.1-arm64.dmg
+          shasum -a 256 -c dist/TAS-1.2.1-arm64.dmg.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: TAS-macOS-arm64
           path: |
-            dist/TAS-1.2.0-arm64.dmg
-            dist/TAS-1.2.0-arm64.dmg.sha256
+            dist/TAS-1.2.1-arm64.dmg
+            dist/TAS-1.2.1-arm64.dmg.sha256
             dist/build-report-arm64.txt
             dist/gui-launch-report.txt
             dist/TAS-native-window.png

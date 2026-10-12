@@ -97,10 +97,25 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(SoftwareVersions(gui: "1.1.4", cliOutput: "tas 1.1.4 (Swift)").isAhead(of: "1.1.3"))
         XCTAssertFalse(versions.isAhead(of: "1.1.3"))
         XCTAssertFalse(SoftwareVersions(gui: "1.1.4", cliOutput: "tas 1.1.2 (Swift)").canInstall(release: "1.1.3"))
-        XCTAssertTrue(versions.canInstall(release: "1.1.3"))
+        XCTAssertFalse(versions.canInstall(release: "1.1.3"), "A GUI tag is not a CLI version declaration")
+        XCTAssertTrue(versions.canInstall(release: "1.1.4"))
+        XCTAssertFalse(SoftwareVersions(gui: "1.2.1", cliOutput: "tas 1.2.0 (Swift)").canInstall(release: "1.2.1"))
+        XCTAssertFalse(SoftwareVersions(gui: "1.2.1", cliOutput: "tas 1.2.0 (Swift)").isAhead(of: "1.2.1"))
         XCTAssertFalse(SoftwareVersions(gui: "开发版", cliOutput: "tas 1.1.2 (Swift)").canInstall(release: "1.1.3"))
         XCTAssertFalse(SoftwareVersions(gui: "1.1.2", cliOutput: nil).canInstall(release: "1.1.3"))
     }
+    func testIndependentBundledCLIVersionMustMatchSignedDeclaration() {
+        let versions = SoftwareVersions(gui: "1.2.1", cliOutput: "tas 1.2.0 (Swift)")
+        XCTAssertTrue(versions.matchesBundleDeclaration(gui: "1.2.1", cli: "1.2.0"))
+        XCTAssertFalse(versions.matchesBundleDeclaration(gui: "1.2.1", cli: nil))
+        XCTAssertFalse(SoftwareVersions(gui: "1.2.1", cliOutput: "tas 1.2.1 (Swift)").matchesBundleDeclaration(gui: "1.2.1", cli: nil), "New bundles must declare the independent CLI version")
+        XCTAssertFalse(versions.matchesBundleDeclaration(gui: "1.2.1", cli: "1.1.9"))
+        XCTAssertFalse(versions.matchesBundleDeclaration(gui: "1.2.0", cli: "1.2.0"))
+        XCTAssertFalse(versions.matchesBundleDeclaration(gui: "1.2.1", cli: "invalid"))
+        XCTAssertFalse(SoftwareVersions(gui: "1.2.1", cliOutput: nil).matchesBundleDeclaration(gui: "1.2.1", cli: "1.2.0"))
+        XCTAssertTrue(SoftwareVersions(gui: "1.2.0", cliOutput: "tas 1.2.0 (Swift)").matchesBundleDeclaration(gui: "1.2.0", cli: nil))
+    }
+
     func testEmbeddedCLIVersionProbeTerminatesUnresponsiveExecutable() throws {
         let script = directory.appendingPathComponent("stall-cli")
         try "#!/bin/sh\ntrap '' TERM\nwhile :; do :; done\n".write(to: script, atomically: true, encoding: .utf8)

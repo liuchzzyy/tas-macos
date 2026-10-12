@@ -2,15 +2,23 @@
 
 用 **Swift + SwiftUI** 重写的 TAS（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套文件处理代码；运行和构建均不需要 npm、Node.js、Electron、WebView 或 Rust。
 
-当前 v1.2.0 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
+当前发布 v1.2.1 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
+
+## GUI 1.2.1（CLI 保持 1.2.0）
+
+- GUI 版本为 **1.2.1（build 9）**，内置 CLI 保持 **1.2.0**。Release 标签代表 GUI 版本，不再被误当成 CLI 最新版本。
+- “文件同步”页面分为“文件同步”和“文件夹同步”：分别拖入文件或文件夹，也可使用上传按钮。移除重复的指定文件新版本入口，同名文件仍可确认保存为新版本。
+- 文件夹拖放用于一次性递归上传，保留顶层目录；持续同步仍须明确添加同步目录，不会因拖放自动启用。
+- 支持简体中文／English 与亮色／暗色／跟随系统，选择会保存；主机器人显示“主机器人（primary）”，存储标识不变。
+- GUI 1.2.0 的旧更新器假定 GUI/CLI 同版本，因此首次升级至分离版本需手动安装 DMG；1.2.1 起按签名应用包的 `TASCLIVersion` 声明校验内置 CLI。
 
 ## 获取与运行
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.0) 下载 [TAS-1.2.0-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.0/TAS-1.2.0-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.0/TAS-1.2.0-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.1) 下载 [TAS-1.2.1-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.1/TAS-1.2.1-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.1/TAS-1.2.1-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
 
 打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 
-需要尚未发布的开发构建时，也可在 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 下载 `TAS-macOS-arm64` artifact；GitHub 会先将 artifact 打包为 ZIP，解压后才是 DMG。
+从源码编译但未发布的开发构建，也可在 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 下载 `TAS-macOS-arm64` artifact；GitHub 会先将 artifact 打包为 ZIP，解压后才是 DMG。
 
 首次使用填写 Bot Token、Chat ID 和加密密码。新文件库密码至少 12 位，并包含大小写字母、数字和符号；创建界面逐项提示，已有文件库仍可用原密码解锁。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。侧栏“版本管理”分别显示 GUI 与应用包内 CLI 的当前版本及 GitHub 最新 Release，可检查更新并确认安装，无须 GitHub CLI；设置页不再重复显示软件版本。自动安装仅支持位于 `/Applications/TAS.app` 且目录可写的应用，否则使用 Releases 手动安装。更新前会校验 Release 的 SHA-256 与应用签名，退出旧程序后备份旧 App 并重启；不会由更新程序修改文件库数据。
 
@@ -57,7 +65,7 @@ tas verify --all-versions --deep
 
 升级前应退出旧客户端并独立备份整个数据目录。历史功能涉及新的索引格式，**升级后的文件库不要再交给旧客户端写入**。旧索引中仍存在的文件可以迁移为初始版本，但此前已经因覆盖丢失索引的版本无法凭空找回。历史记录必须随加密远端索引备份；若远端索引备份失败，应保留本地数据库并重试 `tas index backup`，不能把本地成功误认为异地备份完成。当前远端索引仍有单条消息大小限制，不会通过静默丢弃历史来缩小索引。
 
-GUI 的侧栏“版本管理”现在用于 **GUI 与内置 CLI 软件版本**；文件版本历史则在“所有文件”或“已删除”中选中文件后，通过工具栏、右键菜单或“文件库”菜单打开“版本历史…”。上传新版本统一在“文件夹同步”页选择目标文件后操作。“已删除”侧栏保留被删除文件及其历史；恢复会追加新版本，永久清除另行确认。在“文件夹同步”页同名上传／拖入会提示保存为新版本或改用其他逻辑路径。v1.1.1 增加浅色概览与侧栏导航；v1.1.2 参考 EasyCLIProxyAPI 的浅色卡片层级，调整概览与侧栏底部状态卡。语言/主题图标仍为不可交互占位。
+GUI 的侧栏“版本管理”现在用于 **GUI 与内置 CLI 软件版本**；文件版本历史则在“所有文件”或“已删除”中选中文件后，通过工具栏、右键菜单或“文件库”菜单打开“版本历史…”。新版 GUI 移除独立的新版本上传区，同名上传时仍可确认追加版本。“已删除”侧栏保留被删除文件及其历史；恢复会追加新版本，永久清除另行确认。在“文件同步”页同名上传／拖入会提示保存为新版本或改用其他逻辑路径。v1.1.1 增加浅色概览与侧栏导航；v1.1.2 参考 EasyCLIProxyAPI 的浅色卡片层级，调整概览与侧栏底部状态卡。1.2.1 将语言／主题占位替换为可即时切换并持久保存的控件。
 
 `status --json` 的 `originalBytes` 是活动文件当前版本的原始大小合计；`storedBytes` 是全部保留版本引用的去重内容对象存储大小；`historyBytes` 是其中未被任何活动当前版本引用的部分（包含已删除文件）。两种存储量均不含分块头和索引消息，恢复复用内容不会重复计数。
 
@@ -77,8 +85,8 @@ CLI 测试使用隔离目录和本机 HTTP fixture，不访问真实 Telegram �
 
 ## 功能
 
-- 中文 SwiftUI 文件库：可展开的文件夹层级、完整路径搜索、标签、下载、删除和原生文件选择器。
-- 上传统一位于“文件夹同步”：文件多选、文件夹递归上传、拖放文件或文件夹，以及指定文件的新版本上传。一次性文件夹上传保留所选顶层目录与子目录，不自动添加持续同步；忽略目录内隐藏项，不保存空文件夹，不跟随符号链接。
+- 中英文 SwiftUI 文件库：可展开的文件夹层级、完整路径搜索、标签、下载、删除和原生文件选择器。
+- 上传统一位于“文件同步”：文件多选与文件夹递归上传，各有独立拖放区和上传按钮。一次性文件夹上传保留所选顶层目录与子目录，不自动添加持续同步；忽略目录内隐藏项，不保存空文件夹，不跟随符号链接。
 - AES-256-GCM 加密、gzip 压缩、19 MiB 分块和流式文件处理。
 - 持久化上传队列，网络中断或退出后可继续上传，不依赖原文件仍然存在。
 - 下载完成后校验认证标签、原始大小和 SHA-256，再原子替换目标文件。

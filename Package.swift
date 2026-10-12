@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "TAS",
+    defaultLocalization: "zh-Hans",
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "TASCore", targets: ["TASCore"]),
@@ -20,9 +21,10 @@ let package = Package(
             .target(name: "CCommonCrypto", condition: .when(platforms: [.macOS]))
         ], resources: [.copy("schema.sql")]),
         .executableTarget(name: "tas", dependencies: ["TASCore"]),
-        .executableTarget(name: "TASApp", dependencies: ["TASCore"]),
+        .executableTarget(name: "TASApp", dependencies: ["TASCore"], resources: [.process("Resources")]),
         .executableTarget(name: "TASUpdater", dependencies: ["TASCore"]),
-        .testTarget(name: "TASCoreTests", dependencies: ["TASCore"], resources: [.copy("Fixtures")])
+        .testTarget(name: "TASCoreTests", dependencies: ["TASCore"], resources: [.copy("Fixtures")]),
+        .testTarget(name: "TASAppTests", dependencies: ["TASApp", "TASCore"])
     ],
     swiftLanguageModes: [.v5]
 )

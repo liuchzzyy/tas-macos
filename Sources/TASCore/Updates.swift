@@ -29,6 +29,15 @@ public struct SoftwareVersions {
         cli = ReleaseUpdate.isValidVersion(candidate) ? candidate : nil
     }
 
+    /// Verify independent versions against the signed bundle, not the GUI release tag.
+    /// Bundles before GUI 1.2.1 shared the GUI version; newer bundles must
+    /// declare TASCLIVersion even when both executables happen to match.
+    public func matchesBundleDeclaration(gui expectedGUI: String, cli declaredCLI: String?) -> Bool {
+        guard let expectedCLI = declaredCLI ?? (ReleaseUpdate.isVersion(expectedGUI, newerThan: "1.2.0") ? nil : expectedGUI) else { return false }
+        return ReleaseUpdate.isValidVersion(expectedGUI) && ReleaseUpdate.isValidVersion(expectedCLI)
+            && gui == expectedGUI && cli == expectedCLI
+    }
+
     public func guiNeedsUpdate(to latest: String) -> Bool {
         ReleaseUpdate.isVersion(latest, newerThan: gui)
     }
@@ -40,12 +49,12 @@ public struct SoftwareVersions {
 
     public func canInstall(release latest: String) -> Bool {
         guard ReleaseUpdate.isValidVersion(gui), cli != nil else { return false }
-        return !isAhead(of: latest) && (guiNeedsUpdate(to: latest) || cliNeedsUpdate(to: latest))
+        // Release tags identify the GUI, not the independently versioned CLI.
+        return guiNeedsUpdate(to: latest)
     }
 
     public func isAhead(of latest: String) -> Bool {
-        ReleaseUpdate.isVersion(gui, newerThan: latest) ||
-        (cli.map { ReleaseUpdate.isVersion($0, newerThan: latest) } ?? false)
+        ReleaseUpdate.isVersion(gui, newerThan: latest)
     }
 }
 
