@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Darwin
+import TASCore
 
 // This executable lives outside TAS.app so it can replace the bundle after TAS quits.
 @main enum TASUpdater {
@@ -87,37 +88,29 @@ import Darwin
         guard copies.terminationStatus == 0 else { throw Failure("复制新版本失败") }
         defer { try? fm.removeItem(at: staging) }
         try verified(staging, expected: expectedVersion)
-        try fm.moveItem(at: target, to: backup)
-        do {
-            try fm.moveItem(at: staging, to: target)
-            try verified(target, expected: expectedVersion)
-            var launchResult: Result<Void, Error>?
-            NSWorkspace.shared.openApplication(at: target, configuration: NSWorkspace.OpenConfiguration()) { app, error in
-                if let error { launchResult = .failure(error) }
-                else if app == nil { launchResult = .failure(Failure("Launch Services 未返回新应用")) }
-                else { launchResult = .success(()) }
-            }
-            let deadline = Date().addingTimeInterval(15)
-            while launchResult == nil && Date() < deadline {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-            }
-            guard let launchResult else { throw Failure("新应用重启超时") }
-            try launchResult.get()
-            try "已更新至 TAS \(expectedVersion)；旧版保存在 \(backup.path)".write(to: report, atomically: true, encoding: .utf8)
-        } catch {
-            let updateError = error
-            let failed = parent.appendingPathComponent(".TAS-failed-\(UUID().uuidString).app")
-            if fm.fileExists(atPath: target.path) {
-                do { try fm.moveItem(at: target, to: failed) }
-                catch { throw Failure("无法移走失败的新应用；旧版应用保存在 \(backup.path)，请手动恢复。\(error.localizedDescription)") }
-            }
-            do {
-                try fm.moveItem(at: backup, to: target)
-                try? fm.removeItem(at: failed)
-            } catch {
-                throw Failure("回滚失败；旧版应用保存在 \(backup.path)，请手动恢复。\(error.localizedDescription)")
-            }
-            throw updateError
+        let failed = parent.appendingPathComponent(".TAS-failed-\(UUID().uuidString).app")
+        let outcome = try UpdateInstallationTransaction.install(
+            staging: staging, target: target, backup: backup, failed: failed,
+            verify: { try verified($0, expected: expectedVersion) },
+            launch: { target in
+                var launchResult: Result<Void, Error>?
+                NSWorkspace.shared.openApplication(at: target, configuration: NSWorkspace.OpenConfiguration()) { app, error in
+                    if let error { launchResult = .failure(error) }
+                    else if app == nil { launchResult = .failure(Failure("Launch Services 未返回新应用")) }
+                    else { launchResult = .success(()) }
+                }
+                let deadline = Date().addingTimeInterval(15)
+                while launchResult == nil && Date() < deadline {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                }
+                guard let launchResult else { throw Failure("新应用重启超时") }
+                try launchResult.get()
+            },
+            writeReport: {
+                try "已更新至 TAS \(expectedVersion)；旧版保存在 \(backup.path)".write(to: report, atomically: true, encoding: .utf8)
+            })
+        if let warning = outcome.reportWarning {
+            fputs("TAS update: 已启动新版，但无法保存更新报告：\(warning)\n", stderr)
         }
     }
 }

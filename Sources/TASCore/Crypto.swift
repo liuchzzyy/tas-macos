@@ -1,5 +1,10 @@
 import Foundation
 import CryptoSwift
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 #if canImport(CCommonCrypto)
 import CCommonCrypto
 import CryptoKit
@@ -11,6 +16,38 @@ public enum Crypto {
     public static let chunkSize = 19 * 1024 * 1024
     public static let headerSize = 64
     private static let blockSize = 1024 * 1024
+
+    /// Walk from a trusted root using directory FDs. Never resolve user links,
+    /// and never reopen the path after validation (including the fast path).
+    static func openSource(_ url: URL) throws -> FileHandle {
+        var path = url.path
+        #if os(macOS)
+        // Fixed OS aliases, not user-controlled symlink canonicalization.
+        for alias in ["/var/", "/tmp/", "/etc/"] where path.hasPrefix(alias) {
+            path = "/private" + path
+            break
+        }
+        #endif
+        let parts = path.split(separator: "/")
+        try require(path.hasPrefix("/") && !parts.isEmpty && !parts.contains("..") && !parts.contains(".") && !path.contains("\0"), "源文件路径无效")
+        var directory = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard directory >= 0 else { throw TASError("无法打开源目录") }
+        defer { close(directory) }
+        for part in parts.dropLast() {
+            let next = openat(directory, String(part), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard next >= 0 else { throw TASError("源文件祖先目录不可读取或包含符号链接") }
+            close(directory)
+            directory = next
+        }
+        let fd = openat(directory, String(parts.last!), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { throw TASError("源文件不可读取或是符号链接") }
+        var metadata = stat()
+        guard fstat(fd, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFREG else {
+            close(fd)
+            throw TASError("源文件必须是普通文件")
+        }
+        return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    }
 
     static func key(_ password: String, salt: [UInt8]) throws -> [UInt8] {
         #if canImport(CCommonCrypto)
@@ -78,17 +115,18 @@ public enum Crypto {
     }
     /// Streaming v1 envelope keeps large legacy files compatible without whole-file allocation.
     public static func encryptFile(_ input: URL, to output: URL, password: String, compressed: Bool) throws {
+        let source = try openSource(input); defer { try? source.close() }
         #if canImport(CryptoKit)
         // Keep the legacy envelope while using Apple's accelerated AES for common files.
         // The fixed cap bounds allocation; large inputs continue through the streaming path.
-        if let plain = try boundedData(input, limit: 8 * 1024 * 1024) {
+        if let plain = try boundedData(source, limit: 8 * 1024 * 1024) {
             try Task.checkCancellation()
             let encrypted = try encrypt(compressed ? Gzip.compress(plain) : plain, password: password)
             let destination = try Paths.privateFile(output); defer { try? destination.close() }
             try destination.write(contentsOf: encrypted); try destination.synchronize(); return
         }
         #endif
-        let source = try FileHandle(forReadingFrom: input); defer { try? source.close() }
+        try source.seek(toOffset: 0)
         let destination = try Paths.privateFile(output); defer { try? destination.close() }
         let salt = try random(32); let iv = try random(12)
         let mode = GCM(iv: iv, mode: .detached)
@@ -106,12 +144,15 @@ public enum Crypto {
         try destination.write(contentsOf: Data(tag)); try destination.synchronize()
     }
     public static func decryptFile(_ input: URL, to output: URL, password: String) throws {
-        let source = try FileHandle(forReadingFrom: input); defer { try? source.close() }
+        let source = try openSource(input); defer { try? source.close() }
         let size = try source.seekToEnd(); try require(size >= 60, "加密文件不完整")
         #if canImport(CryptoKit)
         if size <= 8 * 1024 * 1024 + 60 {
             try Task.checkCancellation()
-            let plain = try decrypt(Data(contentsOf: input), password: password)
+            try source.seek(toOffset: 0)
+            let bytes = try source.read(upToCount: Int(size) + 1) ?? Data()
+            try require(bytes.count == Int(size), "加密文件在读取期间发生变化")
+            let plain = try decrypt(bytes, password: password)
             let destination = try Paths.privateFile(output); defer { try? destination.close() }
             try destination.write(contentsOf: plain); try destination.synchronize(); return
         }
@@ -135,15 +176,15 @@ public enum Crypto {
             try destination.write(contentsOf: Data(cipher.finish())); try destination.synchronize()
         } catch { try? destination.close(); try? FileManager.default.removeItem(at: output); throw error }
     }
-    private static func boundedData(_ url: URL, limit: Int) throws -> Data? {
-        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+    private static func boundedData(_ file: FileHandle, limit: Int) throws -> Data? {
         guard try file.seekToEnd() <= UInt64(limit) else { return nil }
         try file.seek(toOffset: 0)
         let data = try file.read(upToCount: limit + 1) ?? Data()
         return data.count <= limit ? data : nil
     }
     public static func hashFile(_ url: URL) throws -> String {
-        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+        try Task.checkCancellation()
+        let file = try openSource(url); defer { try? file.close() }
         #if canImport(CCommonCrypto)
         var context = CC_SHA256_CTX(); CC_SHA256_Init(&context)
         while let data = try file.read(upToCount: blockSize), !data.isEmpty { try Task.checkCancellation(); _ = data.withUnsafeBytes { CC_SHA256_Update(&context, $0.baseAddress, CC_LONG(data.count)) } }

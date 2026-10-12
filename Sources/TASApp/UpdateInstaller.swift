@@ -1,6 +1,5 @@
 #if os(macOS)
 import AppKit
-import CryptoKit
 import Foundation
 import TASCore
 
@@ -17,6 +16,7 @@ enum UpdateInstaller {
     }
 
     static func prepare(_ release: ReleaseUpdate, helper: URL) async throws -> PreparedUpdate {
+        try Task.checkCancellation()
         let fm = FileManager.default
         let directory = fm.temporaryDirectory.appendingPathComponent("tas-update-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -33,10 +33,10 @@ enum UpdateInstaller {
         try fm.moveItem(at: temporary, to: dmg)
         let values = try dmg.resourceValues(forKeys: [.fileSizeKey])
         guard Int64(values.fileSize ?? -1) == release.expectedSize else { throw Failure(L10n.tr("下载文件大小与 Release 不符")) }
-        let digest = SHA256.hash(data: try Data(contentsOf: dmg, options: .mappedIfSafe))
-            .map { String(format: "%02x", $0) }.joined()
+        let digest = try downloadDigest(dmg)
         guard digest == release.expectedSHA256 else { throw Failure(L10n.tr("SHA-256 校验失败，更新已取消")) }
 
+        try Task.checkCancellation()
         let mount = directory.appendingPathComponent("mount", isDirectory: true)
         try fm.createDirectory(at: mount, withIntermediateDirectories: true)
         try run("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount.path, dmg.path],
@@ -59,8 +59,33 @@ enum UpdateInstaller {
         }
         let stagedHelper = directory.appendingPathComponent("TASUpdater")
         try fm.copyItem(at: helper, to: stagedHelper)
+        try Task.checkCancellation()
         handedOff = true
         return PreparedUpdate(app: staged, helper: stagedHelper)
+    }
+
+    /// Caller must recheck active vault work after prepare and before handoff.
+    /// After this returns, the helper owns staging; do not cancel or delete it.
+    static func handoff(_ prepared: PreparedUpdate, target: URL, version: String, report: URL,
+                        launch: (Process) throws -> Void = { try $0.run() }) throws {
+        var handedOff = false
+        defer { if !handedOff { try? FileManager.default.removeItem(at: prepared.app.deletingLastPathComponent()) } }
+        try Task.checkCancellation()
+        try FileManager.default.createDirectory(at: report.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: report)
+        let process = Process()
+        process.executableURL = prepared.helper
+        process.arguments = [prepared.app.path, target.path, version,
+                             "\(ProcessInfo.processInfo.processIdentifier)", report.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try Task.checkCancellation()
+        try launch(process)
+        handedOff = true
+    }
+
+    static func downloadDigest(_ file: URL) throws -> String {
+        try Crypto.hashFile(file)
     }
 
     static var resultURL: URL {

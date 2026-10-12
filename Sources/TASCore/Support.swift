@@ -80,28 +80,54 @@ public enum Paths {
 public final class VaultLock {
     private let url: URL
     private let nonce = UUID().uuidString
+    // Stable inode: never unlink this file, including on failed acquisition/release.
+    private var kernelDescriptor: Int32 = -1
     public init(directory: URL) throws {
         try Paths.privateDirectory(directory)
         url = directory.appendingPathComponent("sync.lock")
-        for _ in 0..<2 {
-            do {
-                let handle = try Paths.privateFile(url)
-                try handle.write(contentsOf: jsonData(["pid": Int(getpid()), "nonce": nonce, "startedAt": timestamp()]))
-                try handle.synchronize(); try handle.close(); return
-            } catch {
-                guard FileManager.default.fileExists(atPath: url.path) else { throw error }
-                if let bytes = try? Data(contentsOf: url), let value = try? jsonObject(bytes), let pid = value["pid"] as? Int, pid > 0, pid <= Int(Int32.max) {
-                    if kill(Int32(pid), 0) == 0 || errno == EPERM { throw TASError("文件库正被进程 \(pid) 使用，请先锁定或退出其他 TAS 客户端") }
-                } else {
-                    let values = try url.resourceValues(forKeys: [.contentModificationDateKey])
-                    if Date().timeIntervalSince(values.contentModificationDate ?? Date()) < 5 { throw TASError("另一个进程正在获取文件库锁，请稍后重试") }
-                }
-                try FileManager.default.removeItem(at: url)
-            }
+        let kernel = directory.appendingPathComponent("sync.kernel.lock")
+        let descriptor = open(kernel.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw TASError("无法打开文件库内核锁") }
+        var acquired = false
+        defer { if !acquired { close(descriptor) } }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            throw TASError("文件库正被其他 TAS 客户端使用")
         }
-        throw TASError("无法获取文件库锁")
+        // Protocol markers advertise PID 1 to legacy clients: it is always live,
+        // so they never cache a dead-owner decision and later unlink our marker.
+        // The real owner is ownerPID; kernel ownership is the authority for new
+        // clients. Unknown legacy markers remain fail-closed, even when stale.
+        if let bytes = try? Data(contentsOf: url), let value = try? jsonObject(bytes),
+           value["lockingProtocol"] as? String == "kernel-v1", value["pid"] as? Int == 1 {
+            try FileManager.default.removeItem(at: url)
+        }
+        do {
+            // Publish a complete compatibility marker atomically. A legacy
+            // client must never see a half-written marker and deem it stale.
+            let temporary = directory.appendingPathComponent(".sync-marker-\(nonce)")
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            let handle = try Paths.privateFile(temporary)
+            defer { try? handle.close() }
+            try handle.write(contentsOf: jsonData(["pid": 1, "ownerPID": Int(getpid()), "lockingProtocol": "kernel-v1", "nonce": nonce, "startedAt": timestamp()]))
+            try handle.synchronize()
+            guard link(temporary.path, url.path) == 0 else { throw TASError("无法发布文件库锁") }
+            kernelDescriptor = descriptor
+            acquired = true
+        } catch {
+            if let bytes = try? Data(contentsOf: url), let value = try? jsonObject(bytes),
+               let pid = value["pid"] as? Int, pid > 0, pid <= Int(Int32.max),
+               kill(Int32(pid), 0) == 0 || errno == EPERM {
+                throw TASError("文件库正被进程 \(pid) 使用，请先锁定或退出其他 TAS 客户端")
+            }
+            // Legacy clients do not take the kernel lock. There is no atomic
+            // compare-and-unlink: reclaiming even a dead marker could unlink a
+            // legacy client's newly acquired marker. Fail closed instead.
+            throw TASError("无法获取文件库锁；若 sync.lock 已陈旧，请先退出所有新旧 TAS 客户端，再手动移除 sync.lock（不要移除 sync.kernel.lock）")
+        }
     }
     deinit {
+        // Remove the compatibility marker while still holding the kernel lock.
         if let data = try? Data(contentsOf: url), let raw = try? jsonObject(data), raw["nonce"] as? String == nonce { try? FileManager.default.removeItem(at: url) }
+        if kernelDescriptor >= 0 { close(kernelDescriptor) }
     }
 }
