@@ -28,11 +28,28 @@ public struct StoredFile: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// Only the fields required to decide whether a sync candidate needs uploading.
+struct CurrentFileState {
+    let hash: String
+    let originalSize: Int64
+    let objectID: Int64
+    let chunks: Int
+    let deleted: Bool
+    let syncPaused: Bool
+    init(_ row: JSON) {
+        hash = string(row["hash"]); originalSize = number(row["original_size"])
+        objectID = number(row["object_id"]); chunks = Int(number(row["chunks"]))
+        deleted = number(row["deleted"]) != 0; syncPaused = number(row["sync_paused"]) != 0
+    }
+}
+
 final class Database {
     private var handle: OpaquePointer?
+    private let queryObserver: ((String) -> Void)?
     let url: URL
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-    init(directory: URL, recover: ((Database) throws -> Void)? = nil) throws {
+    init(directory: URL, queryObserver: ((String) -> Void)? = nil, recover: ((Database) throws -> Void)? = nil) throws {
+        self.queryObserver = queryObserver
         try Paths.privateDirectory(directory)
         url = directory.appendingPathComponent("index.db")
         guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else { throw TASError("无法打开文件索引") }
@@ -52,6 +69,9 @@ final class Database {
             try migrate()
             try versionSchema()
             try script("CREATE TABLE IF NOT EXISTS manifest_journal(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL)")
+            // Separate from mutation recovery: committed uploads must survive cancellation
+            // even when there is no pending upload or prepared mutation left to resume.
+            try script("CREATE TABLE IF NOT EXISTS manifest_dirty(id INTEGER PRIMARY KEY CHECK(id=1))")
         } catch { sqlite3_close(handle); handle = nil; throw error }
     }
     private static var schemaURL: URL? {
@@ -101,6 +121,7 @@ final class Database {
         }
     }
     private func prepare(_ sql: String, _ parameters: [Any?]) throws -> OpaquePointer {
+        queryObserver?(sql)
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw error }
         do {
@@ -175,6 +196,11 @@ final class Database {
         return try rows(sql + " ORDER BY l.filename COLLATE NOCASE", params).map { row in
             StoredFile(row, tags: try rows("SELECT tag FROM tags WHERE file_id=? ORDER BY tag", [row["id"]]).map { string($0["tag"]) })
         }
+    }
+    func currentFileState(filename: String) throws -> CurrentFileState? {
+        // The unique logical filename index makes each lookup independent of
+        // library size. Always re-read after uploads; no stale per-run cache.
+        try rows("SELECT l.deleted,l.sync_paused,v.object_id,o.hash,o.original_size,o.chunks FROM logical_files l JOIN file_versions v ON v.id=l.current_version_id JOIN files o ON o.id=v.object_id WHERE l.filename=?", [filename]).first.map(CurrentFileState.init)
     }
     func manifest(includeShares: Bool = false) throws -> JSON {
         var result: JSON = ["schemaVersion": 2, "logicalFiles": try rows("SELECT * FROM logical_files ORDER BY id"), "versions": try rows("SELECT * FROM file_versions ORDER BY id"), "createdAt": timestamp(), "files": try rows("SELECT * FROM files ORDER BY id"), "chunks": try rows("SELECT * FROM chunks ORDER BY file_id,chunk_index"), "tags": try rows("SELECT * FROM tags ORDER BY id")]

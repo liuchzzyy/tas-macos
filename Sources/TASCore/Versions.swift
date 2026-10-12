@@ -34,12 +34,14 @@ public struct VaultStatistics: Codable, Sendable {
 
 extension Database {
     func statistics() throws -> VaultStatistics {
-        let all = try files(includeDeleted: true)
-        let objects = try rows("SELECT * FROM files WHERE id IN (SELECT object_id FROM file_versions)")
-        let current = Set(all.filter { !$0.deleted }.map(\.objectID))
-        return VaultStatistics(files: all.filter { !$0.deleted }.count, deletedFiles: all.filter(\.deleted).count,
-            versions: try rows("SELECT id FROM file_versions").count,
-            originalBytes: try checkedByteTotal(all.filter { !$0.deleted }.map(\.originalSize)),
+        try adoptLegacyObjects()
+        let all = try rows("SELECT l.deleted,v.object_id,o.original_size FROM logical_files l JOIN file_versions v ON v.id=l.current_version_id JOIN files o ON o.id=v.object_id")
+        let active = all.filter { number($0["deleted"]) == 0 }
+        let objects = try rows("SELECT id,stored_size FROM files WHERE id IN (SELECT object_id FROM file_versions)")
+        let current = Set(active.map { number($0["object_id"]) })
+        return VaultStatistics(files: active.count, deletedFiles: all.count - active.count,
+            versions: Int(number(try rows("SELECT COUNT(*) AS count FROM file_versions").first?["count"])),
+            originalBytes: try checkedByteTotal(active.map { number($0["original_size"]) }),
             storedBytes: try checkedByteTotal(objects.map { number($0["stored_size"]) }),
             historyBytes: try checkedByteTotal(objects.filter { !current.contains(number($0["id"])) }.map { number($0["stored_size"]) }))
     }

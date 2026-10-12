@@ -54,15 +54,19 @@ final class Configuration {
         try Paths.atomicWrite(jsonData(config), to: directory.appendingPathComponent("config.json"))
     }
     func save() throws { try Paths.atomicWrite(jsonData(raw), to: url) }
-    func saveBots(password: String) throws {
-        raw["configVersion"] = 3
-        raw["bots"] = try bots.map { bot -> JSON in
+    func saveBots(password: String, replacing proposedBots: [Bot]? = nil) throws {
+        let proposedBots = proposedBots ?? bots
+        var candidate = raw
+        candidate["configVersion"] = 3
+        candidate["bots"] = try proposedBots.map { bot -> JSON in
             var entry = bot.raw; entry.removeValue(forKey: "botToken")
             if entry["encryptedBotToken"] == nil { entry["encryptedBotToken"] = try Crypto.encrypt(Data(bot.token.utf8), password: password).base64EncodedString() }
             return entry
         }
-        for key in ["botToken", "encryptedBotToken", "chatId", "username", "customApiUrl"] { raw.removeValue(forKey: key) }
-        try save()
+        for key in ["botToken", "encryptedBotToken", "chatId", "username", "customApiUrl"] { candidate.removeValue(forKey: key) }
+        try Paths.atomicWrite(jsonData(candidate), to: url)
+        raw = candidate
+        bots = proposedBots
     }
     func owner(_ id: String?) throws -> Bot {
         if let id, !id.isEmpty, let bot = bots.first(where: { $0.id == id }) { return bot }

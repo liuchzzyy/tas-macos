@@ -37,15 +37,15 @@ public actor Vault {
         lock = try VaultLock(directory: directory)
         let loaded = try Configuration(directory: directory, password: password)
         config = loaded
-        db = try Database(directory: directory) { try ManifestJournal.recover(db: $0, config: loaded, password: password) }
+        db = try Database(directory: directory, recover: { try ManifestJournal.recover(db: $0, config: loaded, password: password) })
         transport = Telegram(); publicationBoundary = { _ in }
     }
-    init(directory: URL, password: String, transport: TelegramTransport, publicationBoundary: @escaping (String) throws -> Void = { _ in }) throws {
+    init(directory: URL, password: String, transport: TelegramTransport, queryObserver: ((String) -> Void)? = nil, publicationBoundary: @escaping (String) throws -> Void = { _ in }) throws {
         self.directory = directory; self.password = password
         lock = try VaultLock(directory: directory)
         let loaded = try Configuration(directory: directory, password: password)
         config = loaded
-        db = try Database(directory: directory) { try ManifestJournal.recover(db: $0, config: loaded, password: password, boundary: publicationBoundary) }
+        db = try Database(directory: directory, queryObserver: queryObserver) { try ManifestJournal.recover(db: $0, config: loaded, password: password, boundary: publicationBoundary) }
         self.transport = transport; self.publicationBoundary = publicationBoundary
     }
     public static func create(directory: URL = Paths.dataDirectory, password: String, token: String, chatID: String, endpoint: String? = nil) async throws {
@@ -92,7 +92,7 @@ public actor Vault {
         try require(replace || existing == nil, "同名文件已存在，请使用替换选项或修改逻辑路径")
         progress(TransferProgress("计算校验值 · \(filename)"))
         let hash = try knownHash ?? Crypto.hashFile(source); let compressed = Crypto.shouldCompress(filename)
-        if let existing, try file(number(existing["id"])).hash == hash { return 0 }
+        if existing != nil, try db.currentFileState(filename: filename)?.hash == hash { return 0 }
         let stagingRoot = ProcessInfo.processInfo.environment["TAS_TMP_DIR"].map { URL(fileURLWithPath: $0) } ?? directory.appendingPathComponent("tmp")
         let stage = try Paths.temporary(in: stagingRoot, prefix: "upload-"); try Paths.privateDirectory(stage)
         var persisted = false
@@ -184,6 +184,7 @@ public actor Vault {
             if let previous { logicalID = number(previous["id"]) }
             else { logicalID = try db.run("INSERT INTO logical_files(filename) VALUES(?)", [upload["filename"]]) }
             try db.appendVersion(logicalID, objectID: fileID, source: (upload["source"] as? String) ?? "upload", message: upload["message"] as? String)
+            try db.run("INSERT OR IGNORE INTO manifest_dirty(id) VALUES(1)")
             try db.run("DELETE FROM pending_uploads WHERE id=?", [id])
         }
         // Only remove the directory when empty: legacy paths are never recursively deleted.
@@ -199,7 +200,9 @@ public actor Vault {
             catch is CancellationError { throw CancellationError() }
             catch { failures.append("\(upload.filename)：\(error.localizedDescription)") }
         }
-        let result = completed > 0 ? await publishResult("已继续完成 \(completed) 个上传", progress: progress) : OperationResult("没有完成新的上传")
+        let message = completed > 0 ? "已继续完成 \(completed) 个上传" : "没有完成新的上传"
+        let needsPublication = try !db.rows("SELECT id FROM manifest_dirty WHERE id=1").isEmpty
+        let result = needsPublication ? await publishResult(message, progress: progress) : OperationResult(message)
         let warnings = failures + [result.warning].compactMap { $0 }
         return OperationResult(result.message, warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))
     }
@@ -272,6 +275,9 @@ public actor Vault {
         let previous = config.raw["remoteManifest"] as? JSON
         config.raw["remoteManifest"] = ["version": 2, "botId": bot.id, "messageId": result.messageID, "fileId": result.fileID, "createdAt": snapshot["createdAt"]!, "files": (snapshot["files"] as? [JSON])?.count ?? 0, "chunks": (snapshot["chunks"] as? [JSON])?.count ?? 0]
         do { try config.save() } catch { config.raw["remoteManifest"] = previous; throw error }
+        // Clear only after the recovery pointer is durable. A crash before this
+        // write may repeat a backup, but cannot lose unpublished local content.
+        try db.run("DELETE FROM manifest_dirty WHERE id=1")
         if let previous, let owner = try? config.owner(previous["botId"] as? String) { try? await transport.delete(string(previous["messageId"]), bot: owner) }
     }
     /// Capture an intended mutation, then publish from a durable outbox rather
@@ -439,26 +445,25 @@ public actor Vault {
         var raw: JSON = ["id": id, "chatId": chatID, "enabled": true, "createdAt": timestamp(), "encryptedBotToken": try Crypto.encrypt(Data(token.utf8), password: password).base64EncodedString()]
         if let endpoint, !endpoint.isEmpty { raw["customApiUrl"] = endpoint }
         let username = try await transport.check(Bot(raw: raw, token: token)); raw["username"] = username
-        let previous = config.bots; config.bots.append(Bot(raw: raw, token: token))
-        do { try config.saveBots(password: password) } catch { config.bots = previous; throw error }
+        try config.saveBots(password: password, replacing: config.bots + [Bot(raw: raw, token: token)])
     }
     public func updateBot(_ id: String, enabled: Bool? = nil, endpoint: String? = nil, remove: Bool = false) throws {
         try begin(); defer { busy = false }
         guard let index = config.bots.firstIndex(where: { $0.id == id }) else { throw TASError("机器人不存在") }
-        let previous = config.bots
+        var proposed = config.bots
         if remove {
             let legacy = id == "primary" || config.bots.count == 1
             let count = try db.rows("SELECT id FROM chunks WHERE bot_id=? OR (?=1 AND bot_id IS NULL) UNION ALL SELECT id FROM pending_chunks WHERE bot_id=? OR (?=1 AND uploaded=1 AND bot_id IS NULL)", [id, legacy ? 1 : 0, id, legacy ? 1 : 0]).count
             let pointer = config.raw["remoteManifest"] as? JSON
             let manifestOwner = pointer.flatMap { try? config.owner($0["botId"] as? String).id }
             try require(count == 0 && manifestOwner != id, "仍有分块或恢复索引依赖此机器人；可以停用，但不能移除")
-            config.bots.remove(at: index)
+            proposed.remove(at: index)
         } else {
-            if let enabled { config.bots[index].raw["enabled"] = enabled }
-            if let endpoint { try Configuration.validate(id: id, token: config.bots[index].token, chatID: config.bots[index].chatID, endpoint: endpoint); config.bots[index].raw["customApiUrl"] = endpoint.isEmpty ? nil : endpoint }
+            if let enabled { proposed[index].raw["enabled"] = enabled }
+            if let endpoint { try Configuration.validate(id: id, token: proposed[index].token, chatID: proposed[index].chatID, endpoint: endpoint); proposed[index].raw["customApiUrl"] = endpoint.isEmpty ? nil : endpoint }
         }
-        do { try require(config.bots.contains(where: \.enabled), "必须保留至少一个启用的机器人"); try config.saveBots(password: password) }
-        catch { config.bots = previous; throw error }
+        try require(proposed.contains(where: \.enabled), "必须保留至少一个启用的机器人")
+        try config.saveBots(password: password, replacing: proposed)
     }
     private static func canonicalPath(_ url: URL) throws -> String {
         guard let resolved = realpath(url.path, nil) else { throw TASError("无法解析路径：\(url.path)") }
@@ -516,10 +521,11 @@ public actor Vault {
         let grouped = Dictionary(grouping: candidates, by: \.logical)
         let conflicts = grouped.filter { $0.value.count > 1 }.keys.sorted()
         try require(conflicts.isEmpty, "同步路径冲突（未上传任何文件）：" + conflicts.joined(separator: ", "))
+        try db.adoptLegacyObjects()
         for candidate in candidates {
             do {
                 try Task.checkCancellation()
-                let current = try db.files(includeDeleted: true).first { $0.filename == candidate.logical }
+                let current = try db.currentFileState(filename: candidate.logical)
                 if let current, current.deleted || current.syncPaused { continue }
                 try requireNoPending(candidate.logical)
                 if let current,
@@ -537,7 +543,9 @@ public actor Vault {
             } catch is CancellationError { throw CancellationError() }
             catch { failures.append("\(candidate.logical)：\(error.localizedDescription)") }
         }
-        let result = changed > 0 ? await publishResult("同步完成，更新 \(changed) 个文件", progress: progress) : OperationResult("同步完成，没有文件需要更新")
+        let message = changed > 0 ? "同步完成，更新 \(changed) 个文件" : "同步完成，没有文件需要更新"
+        let needsPublication = try !db.rows("SELECT id FROM manifest_dirty WHERE id=1").isEmpty
+        let result = needsPublication ? await publishResult(message, progress: progress) : OperationResult(message)
         let warnings = failures + [result.warning].compactMap { $0 }
         return OperationResult(result.message, warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))
     }
