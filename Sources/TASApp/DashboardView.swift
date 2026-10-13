@@ -14,7 +14,14 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text(L10n.tr("概览")).font(LibraryStyle.pageTitle).accessibilityAddTraits(.isHeader)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.tr("概览")).font(LibraryStyle.pageTitle).accessibilityAddTraits(.isHeader)
+                        Text(L10n.tr("管理加密文件、版本和备份。"))
+                            .font(LibraryStyle.body).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
 
                 HStack(spacing: 9) {
                     Image(systemName: model.vault == nil ? "eye" : "checkmark.shield.fill")
@@ -28,11 +35,11 @@ struct DashboardView: View {
                 .padding(.horizontal, 16).frame(height: 42)
                 .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 11))
 
-                HStack(spacing: 12) {
-                    metric(L10n.tr("文件"), value: model.statistics.map { "\($0.files)" } ?? "—", icon: "doc.on.doc")
-                    metric(L10n.tr("版本"), value: model.statistics.map { "\($0.versions)" } ?? "—", icon: "clock.arrow.circlepath")
-                    metric(L10n.tr("待续传"), value: model.vault == nil ? "—" : "\(model.pending.count)", icon: "arrow.up.circle")
-                    metric(L10n.tr("存储"), value: model.statistics.map { bytes($0.storedBytes) } ?? "—", icon: "externaldrive")
+                HStack(spacing: 14) {
+                    metric(L10n.tr("当前文件"), value: model.statistics.map { "\($0.files)" } ?? "—", detail: L10n.tr("文件库中的有效文件"), icon: "doc.on.doc")
+                    metric(L10n.tr("历史版本"), value: model.statistics.map { "\($0.versions)" } ?? "—", detail: L10n.tr("包含已删除文件"), icon: "clock.arrow.circlepath")
+                    metric(L10n.tr("待续传"), value: model.vault == nil ? "—" : "\(model.pending.count)", detail: L10n.tr("未完成的上传"), icon: "arrow.up.circle")
+                    metric(L10n.tr("占用空间"), value: model.statistics.map { bytes($0.storedBytes) } ?? "—", detail: L10n.tr("去重后加密内容"), icon: "externaldrive")
                 }
 
                 HStack(alignment: .top, spacing: 16) {
@@ -41,7 +48,7 @@ struct DashboardView: View {
                             HStack {
                                 sectionHeading(L10n.tr("最近文件"), icon: "doc.text")
                                 Spacer()
-                                Button(L10n.tr("全部"), systemImage: "arrow.right") { openSection("files") }
+                                Button(L10n.tr("查看全部"), systemImage: "arrow.right") { openSection("files") }
                                     .buttonStyle(.borderless)
                             }
                             Divider()
@@ -83,7 +90,7 @@ struct DashboardView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(12)
                             .background(TASDesign.canvas, in: RoundedRectangle(cornerRadius: 9))
-                            Button(L10n.tr("立即备份"), systemImage: "arrow.up.doc") {
+                            Button(L10n.tr("备份索引"), systemImage: "arrow.up.doc") {
                                 model.run(L10n.tr("备份索引")) { vault, _ in try await vault.backupIndex() }
                             }
                             .disabled(!model.canOperate || model.historyFile != nil)
@@ -115,20 +122,21 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, minHeight: 114)
     }
 
-    private func metric(_ title: String, value: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+    private func metric(_ title: String, value: String, detail: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 15)).foregroundStyle(TASDesign.accent)
-                .frame(width: 26, height: 26)
+                .font(.system(size: 17)).foregroundStyle(TASDesign.accent)
+                .frame(width: 28, height: 28)
                 .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 9))
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 22, weight: .semibold, design: .rounded))
+            Text(title).font(LibraryStyle.helper).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 25, weight: .semibold, design: .rounded))
                 .monospacedDigit().minimumScaleFactor(0.7).lineLimit(1)
+            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .frame(height: 110, alignment: .topLeading)
-        .tasCard(cornerRadius: 12)
+        .padding(14)
+        .frame(height: 144, alignment: .topLeading)
+        .tasCard(cornerRadius: 14)
         .accessibilityElement(children: .combine)
     }
 }

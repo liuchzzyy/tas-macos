@@ -10,9 +10,9 @@ struct UploadCenterView: View {
         LibrarySurface(padding: 16) {
             VStack(alignment: .leading, spacing: 13) {
                 HStack {
-                    Label(L10n.tr("上传"), systemImage: "tray.and.arrow.up").font(LibraryStyle.sectionTitle)
+                    Label(L10n.tr("文件（文件夹）上传"), systemImage: "tray.and.arrow.up").font(LibraryStyle.sectionTitle)
                     Spacer()
-                    Button(L10n.tr("选择文件…"), systemImage: "doc.badge.plus") { model.chooseUpload() }
+                    Button(L10n.tr("上传文件或文件夹…"), systemImage: "doc.badge.plus") { model.chooseUpload() }
                         .keyboardShortcut("u").buttonStyle(.borderedProminent)
                         .disabled(!model.canOperate || model.historyFile != nil)
                 }

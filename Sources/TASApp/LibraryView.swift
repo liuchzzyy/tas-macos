@@ -29,6 +29,8 @@ struct LibraryView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(showDeleted ? L10n.tr("已删除") : L10n.tr("所有文件")).font(LibraryStyle.pageTitle)
+                    Text(showDeleted ? L10n.tr("选择文件并从版本历史中恢复。") : L10n.tr("按文件夹层级查找、管理和取回文件。"))
+                        .font(LibraryStyle.body).foregroundStyle(.secondary)
                 }
                 Spacer()
             }

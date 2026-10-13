@@ -35,6 +35,8 @@ struct VersionManagementView: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(L10n.tr("版本管理")).font(LibraryStyle.pageTitle).accessibilityAddTraits(.isHeader)
+                    Text(L10n.tr("查看桌面客户端与随应用提供的命令行版本。"))
+                        .font(LibraryStyle.body).foregroundStyle(.secondary)
                 }
                 versionCard(title: L10n.tr("桌面客户端 (GUI)"), icon: "macwindow", installed: guiVersion,
                             latest: latestVersion, detail: L10n.tr("TAS.app · 图形界面"))

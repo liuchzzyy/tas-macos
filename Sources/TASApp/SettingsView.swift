@@ -13,7 +13,11 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text(L10n.tr("设置")).font(LibraryStyle.pageTitle)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.tr("设置")).font(LibraryStyle.pageTitle)
+                    Text(L10n.tr("管理文件库、连接与恢复。"))
+                        .font(LibraryStyle.body).foregroundStyle(.secondary)
+                }
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(L10n.tr("启动与窗口")).font(LibraryStyle.sectionTitle)

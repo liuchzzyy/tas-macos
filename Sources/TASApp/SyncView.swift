@@ -10,7 +10,10 @@ struct SyncView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.tr("文件同步")).font(LibraryStyle.pageTitle)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.tr("文件同步")).font(LibraryStyle.pageTitle)
+                    Text(L10n.tr("统一上传文件，或持续同步本地文件夹。")).font(LibraryStyle.body).foregroundStyle(.secondary)
+                }
                 UploadCenterView()
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {

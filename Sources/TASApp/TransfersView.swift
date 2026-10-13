@@ -10,7 +10,11 @@ struct TransfersView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text(L10n.tr("传输任务")).font(LibraryStyle.pageTitle)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.tr("传输任务")).font(LibraryStyle.pageTitle)
+                    Text(L10n.tr("中断的上传会保留加密分块，稍后可以继续。"))
+                        .font(LibraryStyle.body).foregroundStyle(.secondary)
+                }
                 LibrarySurface {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack {

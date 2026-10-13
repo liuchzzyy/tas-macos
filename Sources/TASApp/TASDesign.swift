@@ -71,7 +71,7 @@ struct TASSectionLabel: View {
             .textCase(.uppercase)
             .tracking(0.5)
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 19)
+            .padding(.horizontal, 18)
             .padding(.bottom, 3)
             .accessibilityAddTraits(.isHeader)
     }
