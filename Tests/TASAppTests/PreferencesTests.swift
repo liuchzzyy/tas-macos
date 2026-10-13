@@ -31,6 +31,35 @@ final class PreferencesTests: XCTestCase {
         preferences.rememberPassword = false
         XCTAssertFalse(AppPreferences(defaults: defaults).rememberPassword)
     }
+    @MainActor func testStartupPreferencesPersistAndCloseDefaultsToQuit() {
+        let suite = "TASPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let prefs = AppPreferences(defaults: defaults)
+        XCTAssertFalse(prefs.silentLaunch)
+        XCTAssertEqual(prefs.closeBehavior, .quit)
+        prefs.silentLaunch = true
+        prefs.closeBehavior = .menuBar
+        let reloaded = AppPreferences(defaults: defaults)
+        XCTAssertTrue(reloaded.silentLaunch)
+        XCTAssertEqual(reloaded.closeBehavior, .menuBar)
+        defaults.set("invalid", forKey: AppPreferences.closeBehaviorKey)
+        XCTAssertEqual(AppPreferences(defaults: defaults).closeBehavior, .quit)
+    }
+    @MainActor func testClosePolicyQuitsByDefaultAndRetainsMenuBarWhenSelected() {
+        let suite = "TASPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let prefs = AppPreferences(defaults: defaults)
+        XCTAssertTrue(StartupSettings.shouldQuitAfterLastWindow(preferences: prefs))
+        prefs.closeBehavior = .menuBar
+        XCTAssertFalse(StartupSettings.shouldQuitAfterLastWindow(preferences: prefs))
+    }
+    @MainActor func testNewStartupStringsAreTranslated() {
+        XCTAssertEqual(L10n.tr("登录后启动", language: .english), "Launch at Login")
+        XCTAssertEqual(L10n.tr("静默启动", language: .english), "Start Silently")
+        XCTAssertEqual(L10n.tr("保留在菜单栏", language: .english), "Keep in Menu Bar")
+    }
     func testExplicitLocalizationPreservesInterpolatedUserContentAndBotIDs() {
         XCTAssertEqual(L10n.tr("文件同步", language: .english), "File Sync")
         XCTAssertEqual(L10n.tr("文件夹同步", language: .english), "Folder Sync")

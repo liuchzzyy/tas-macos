@@ -191,6 +191,18 @@ class WorkspaceUIContractTests(unittest.TestCase):
         self.assertIn('ReleaseCLIVersion', versions)
         self.assertIn('TASCLIVersion', (APP / "ReleaseCLIVersion.swift").read_text() if (APP / "ReleaseCLIVersion.swift").exists() else '')
 
+    def test_startup_and_close_options_are_wired_in_settings(self):
+        settings = (APP / "SettingsView.swift").read_text()
+        app = (APP / "TASApp.swift").read_text()
+        for label in ("开机自启", "静默启动", "关闭行为"):
+            self.assertIn(f'L10n.tr("{label}")', settings)
+        self.assertIn('StartupSettings.setLaunchAtLogin', settings)
+        self.assertIn('preferences.silentLaunch', settings)
+        self.assertIn('preferences.closeBehavior', settings)
+        self.assertIn('applicationShouldTerminateAfterLastWindowClosed', app)
+        self.assertIn('MenuBarExtra', app)
+        self.assertIn('openWindow(id: "main")', app)
+
     def test_settings_has_no_duplicate_software_version_surface(self):
         settings = section("struct SettingsView:", "struct AddBotView:")
         for obsolete in ["软件版本", "openVersionManagement", "CFBundleShortVersionString", "TASGitHash"]:

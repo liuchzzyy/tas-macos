@@ -18,6 +18,13 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Helpers" "$app/Contents/Resources"
 cp "$build_dir/TASDesktop" "$app/Contents/MacOS/TAS"
 cp "$build_dir/tas" "$app/Contents/Helpers/tas"
 cp "$build_dir/TASUpdater" "$app/Contents/Helpers/TASUpdater"
+# The signed login item launches the main app with a private startup marker.
+# No LaunchAgent or user-library plist is written outside this bundle.
+login_item="$app/Contents/Library/LoginItems/TASLoginHelper.app"
+mkdir -p "$login_item/Contents/MacOS"
+swiftc -O scripts/login-helper.swift -o "$login_item/Contents/MacOS/TASLoginHelper"
+cp Resources/LoginHelperInfo.plist "$login_item/Contents/Info.plist"
+strip -x "$login_item/Contents/MacOS/TASLoginHelper"
 strip -x "$app/Contents/MacOS/TAS" "$app/Contents/Helpers/tas" "$app/Contents/Helpers/TASUpdater"
 cp Resources/Info.plist "$app/Contents/Info.plist"
 # Embed the source revision in the signed app instead of relying on .git at runtime.
@@ -36,8 +43,10 @@ rm -rf dist/TAS.iconset
 mkdir -p "$app/Contents/Frameworks"
 echo "Copying Swift compatibility libraries"
 xcrun swift-stdlib-tool --copy --scan-executable "$app/Contents/MacOS/TAS" --scan-executable "$app/Contents/Helpers/tas" --scan-executable "$app/Contents/Helpers/TASUpdater" --platform macosx --destination "$app/Contents/Frameworks"
-echo "Signing application"
+echo "Signing login item and application"
+codesign --force --sign "${TAS_SIGN_IDENTITY:--}" "$login_item"
 codesign --force --deep --sign "${TAS_SIGN_IDENTITY:--}" "$app"
+codesign --verify --strict "$login_item"
 codesign --verify --deep --strict "$app"
 # Hide build products while testing so bundled resources cannot fall back to the checkout.
 mv "$build_dir/TAS_TASCore.bundle" "$build_dir/TAS_TASCore.bundle.hidden"
@@ -48,11 +57,11 @@ echo "Testing application startup"
 python3 scripts/check-process.py "$app/Contents/MacOS/TAS" --smoke-test
 mv "$build_dir/TAS_TASCore.bundle.hidden" "$build_dir/TAS_TASCore.bundle"
 trap - EXIT
-archive="$PWD/dist/TAS-1.3.4-arm64.dmg"
+archive="$PWD/dist/TAS-1.3.5-arm64.dmg"
 rm -f "$archive"
 hdiutil create -volname TAS -srcfolder "$app" -ov -format UDZO "$archive"
 hdiutil verify "$archive"
-(cd dist && shasum -a 256 TAS-1.3.4-arm64.dmg > TAS-1.3.4-arm64.dmg.sha256)
+(cd dist && shasum -a 256 TAS-1.3.5-arm64.dmg > TAS-1.3.5-arm64.dmg.sha256)
 {
   echo "Architecture: arm64"
   du -sh "$app" "$archive"

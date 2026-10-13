@@ -4,14 +4,20 @@ import AppKit
 import UniformTypeIdentifiers
 import TASCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let preferences = AppPreferences.shared
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if TAS_UI_PREVIEW
         if UIPreviewRenderer.renderIfRequested() { return }
         #endif
-        NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps: true)
+        NSApp.setActivationPolicy(.regular)
+        if !StartupSettings.shouldStartHidden(arguments: CommandLine.arguments, preferences: preferences) {
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        StartupSettings.shouldQuitAfterLastWindow(preferences: preferences)
+    }
 }
 
 @main struct TASApplication: App {
@@ -25,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     var body: some Scene {
-        WindowGroup("TAS") {
+        WindowGroup("TAS", id: "main") {
             RootView().environmentObject(model).frame(minWidth: 960, minHeight: 650)
                 .tint(TASDesign.accent)
                 .onAppear {
@@ -40,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .alert("TAS", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) { Button(L10n.tr("知道了")) { model.notice = nil } } message: { Text(L10n.current(model.notice ?? "")) }
         }
         .defaultSize(width: 1120, height: 760)
+        .defaultLaunchBehavior(StartupSettings.shouldStartHidden(arguments: CommandLine.arguments, preferences: preferences) ? .suppressed : .presented)
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {}
@@ -54,6 +61,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Button(L10n.tr("备份索引")) { model.run(L10n.tr("备份索引")) { vault, _ in try await vault.backupIndex() } }.disabled(!model.canOperate || model.historyFile != nil)
             }
         }
+        MenuBarExtra("TAS", systemImage: "shippingbox.fill") {
+            MenuBarActions()
+        }.menuBarExtraStyle(.menu)
+    }
+}
+
+struct MenuBarActions: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button(L10n.tr("打开 TAS")) {
+            openWindow(id: "main")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        Divider()
+        Button(L10n.tr("退出 TAS")) { NSApp.terminate(nil) }
     }
 }
 

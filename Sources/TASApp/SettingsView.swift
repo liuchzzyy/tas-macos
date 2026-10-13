@@ -19,6 +19,43 @@ struct SettingsView: View {
                         .font(LibraryStyle.body).foregroundStyle(.secondary)
                 }
                 LibrarySurface(padding: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.tr("启动与窗口")).font(LibraryStyle.sectionTitle)
+                        Divider()
+                        HStack {
+                            Label(L10n.tr("开机自启"), systemImage: "power")
+                            Spacer()
+                            Toggle(L10n.tr("登录后启动"), isOn: Binding(
+                                get: { preferences.launchAtLogin },
+                                set: { enabled in
+                                    do { try StartupSettings.setLaunchAtLogin(enabled, preferences: preferences) }
+                                    catch { model.notice = L10n.tr("无法更改登录项：%@", String(describing: error.localizedDescription)) }
+                                }
+                            )).labelsHidden().toggleStyle(.switch)
+                                .disabled(!Bundle.main.bundleURL.path.hasPrefix("/Applications/"))
+                                .help(L10n.tr("仅安装在“应用程序”中的 TAS 可设置登录后启动。"))
+                        }
+                        Divider()
+                        HStack {
+                            Label(L10n.tr("静默启动"), systemImage: "moon.zzz")
+                                .help(L10n.tr("仅登录后自启时不显示窗口；可从菜单栏打开 TAS。手动打开仍显示窗口。"))
+                            Spacer()
+                            Toggle(L10n.tr("静默启动"), isOn: $preferences.silentLaunch).labelsHidden().toggleStyle(.switch)
+                        }
+                        Divider()
+                        HStack {
+                            Label(L10n.tr("关闭行为"), systemImage: "macwindow.on.rectangle")
+                            Spacer()
+                            Picker(L10n.tr("关闭窗口时"), selection: $preferences.closeBehavior) {
+                                Text(L10n.tr("退出 TAS")).tag(AppCloseBehavior.quit)
+                                Text(L10n.tr("保留在菜单栏")).tag(AppCloseBehavior.menuBar)
+                            }.labelsHidden().frame(width: 175)
+                        }
+                        Text(L10n.tr("关闭窗口后选择保留在菜单栏时，文件库仍保持解锁并可继续同步；在菜单栏中选择退出才会结束。"))
+                            .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                    }
+                }
+                LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(L10n.tr("文件库")).font(LibraryStyle.sectionTitle)
                         Divider()

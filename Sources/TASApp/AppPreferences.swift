@@ -7,21 +7,31 @@ enum AppAppearance: String, CaseIterable {
     case light, dark, system
     var colorScheme: ColorScheme? { switch self { case .light: return .light; case .dark: return .dark; case .system: return nil } }
 }
+enum AppCloseBehavior: String, CaseIterable { case quit, menuBar }
 
 @MainActor final class AppPreferences: ObservableObject {
     static let shared = AppPreferences()
     static let languageKey = "TAS.interfaceLanguage"
     static let appearanceKey = "TAS.interfaceAppearance"
     static let rememberPasswordKey = "TAS.rememberPassword"
+    static let silentLaunchKey = "TAS.silentLaunch"
+    static let launchAtLoginKey = "TAS.launchAtLogin"
+    static let closeBehaviorKey = "TAS.closeBehavior"
     private let defaults: UserDefaults
     @Published var language: AppLanguage { didSet { defaults.set(language.rawValue, forKey: Self.languageKey) } }
     @Published var appearance: AppAppearance { didSet { defaults.set(appearance.rawValue, forKey: Self.appearanceKey) } }
+    @Published var silentLaunch: Bool { didSet { defaults.set(silentLaunch, forKey: Self.silentLaunchKey) } }
+    @Published var launchAtLogin: Bool { didSet { defaults.set(launchAtLogin, forKey: Self.launchAtLoginKey) } }
+    @Published var closeBehavior: AppCloseBehavior { didSet { defaults.set(closeBehavior.rawValue, forKey: Self.closeBehaviorKey) } }
     /// Off by default: storing the vault password in the keychain is opt-in.
     @Published var rememberPassword: Bool { didSet { defaults.set(rememberPassword, forKey: Self.rememberPasswordKey) } }
     init(defaults: UserDefaults = L10n.defaults) {
         self.defaults = defaults
         language = AppLanguage(rawValue: defaults.string(forKey: Self.languageKey) ?? "") ?? .chinese
         appearance = AppAppearance(rawValue: defaults.string(forKey: Self.appearanceKey) ?? "") ?? .system
+        silentLaunch = defaults.bool(forKey: Self.silentLaunchKey)
+        launchAtLogin = defaults.bool(forKey: Self.launchAtLoginKey)
+        closeBehavior = AppCloseBehavior(rawValue: defaults.string(forKey: Self.closeBehaviorKey) ?? "") ?? .quit
         rememberPassword = defaults.bool(forKey: Self.rememberPasswordKey)
     }
 }
