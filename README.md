@@ -2,11 +2,14 @@
 
 用 **Swift + SwiftUI** 重写的 TAS（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套文件处理代码；运行和构建均不需要 npm、Node.js、Electron、WebView 或 Rust。
 
-当前发布 v1.3.3 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
+当前发布 v1.3.4 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
 
-## GUI 1.3.3（CLI 1.3.1）
+## GUI 1.3.4（CLI 1.3.1）
 
-- GUI 版本为 **1.3.3（build 12）**，内置 CLI 为 **1.3.1**。Release 标签代表 GUI 版本，不再被误当成 CLI 最新版本。
+- GUI 版本为 **1.3.4（build 13）**，内置 CLI 保持 **1.3.1**。Release 标签代表 GUI 版本，不再被误当成 CLI 最新版本。
+- 可选择将登录密码保存在本机 Apple 登录钥匙串，后续启动自动解锁；默认关闭。更改密码后同步更新钥匙串，关闭选项或点“忘记保存的密码”会移除凭据。手动锁定不会立刻自动解锁。此功能并非独立备份，且不应在不受信任的 Mac 账户上启用。
+- “所有文件”中的文件夹现可单选/多选，与文件混选；下载保留逻辑目录层级，删除作用于文件夹的全部后代文件（包括折叠或被搜索过滤隐藏的文件），并先显示确认。空目录仍不独立保存。
+- “文件同步”的虚线框支持 Finder 文件/文件夹拖入和点击选择；混选先整体校验再上传，拒绝符号链接及远端 URL。图标和文字改为居中分层排列。
 - “文件同步”页面将文件与文件夹的一次性上传合并为同一个按钮和拖放区；持续同步仍需单独添加目录。同名文件仍可确认保存为新版本。
 - 文件夹拖放用于一次性递归上传，保留顶层目录；持续同步仍须明确添加同步目录，不会因拖放自动启用。
 - 支持简体中文／English 与亮色／暗色／跟随系统，选择会保存；主机器人显示“主机器人（primary）”，存储标识不变。
@@ -14,7 +17,7 @@
 
 ## 获取与运行
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.3.3) 下载 [TAS-1.3.3-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.3.3/TAS-1.3.3-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.3.3/TAS-1.3.3-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.3.4) 下载 [TAS-1.3.4-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.3.4/TAS-1.3.4-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.3.4/TAS-1.3.4-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
 
 打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 

@@ -22,6 +22,9 @@ import TASCore
     @Published var notice: String?
     @Published var logs = SessionLog()
     @Published var autoSync = false
+    /// Mirrors whether a keychain copy exists, so views never touch the keychain
+    /// while rendering.
+    @Published var passwordStored = false
     @Published var selectedFileID: StoredFile.ID?
     @Published var historyFile: StoredFile?
     @Published var historyVersions: [FileVersion] = []
@@ -32,6 +35,11 @@ import TASCore
     }
     @Published private var settingsDialog = SettingsDialogCoordinator()
     private var task: Task<Void, Never>?
+    /// Auto-unlock runs once per vault directory so a failed attempt cannot loop.
+    private var autoUnlockAttemptedDirectory: String?
+    /// In-memory only: lets "remember password" take effect without a re-unlock.
+    /// Never written anywhere except the keychain, and dropped when the vault locks.
+    private var sessionPassword: String?
     init() {}
     var configured: Bool {
         #if TAS_UI_PREVIEW
@@ -69,7 +77,7 @@ import TASCore
     var canUseSelection: Bool { canOperate && historyFile == nil && selection != nil }
     var canUploadVersion: Bool { canUseSelection && selection?.deleted == false }
     var canResumeSync: Bool { canUploadVersion && selection?.syncPaused == true }
-    func open(password: String, token: String?, chat: String?, endpoint: String?) {
+    func open(password: String, token: String?, chat: String?, endpoint: String?, fromKeychain: Bool = false) {
         #if !TAS_UI_PREVIEW
         guard !busy else { return }; busy = true; notice = nil; progress = TransferProgress(L10n.tr("正在解锁文件库"))
         let directory = directory
@@ -77,15 +85,83 @@ import TASCore
             do {
                 if let token, let chat { try await Vault.create(directory: directory, password: password, token: token, chatID: chat, endpoint: endpoint) }
                 let opened = try await Task.detached(priority: .userInitiated) { try Vault(directory: directory, password: password) }.value
-                vault = opened; try await refresh(opened); progress = TransferProgress(L10n.tr("文件库已解锁"))
-            } catch { notice = error.localizedDescription }
+                try await refresh(opened)
+                vault = opened; progress = TransferProgress(L10n.tr("文件库已解锁"))
+                sessionPassword = password
+                if AppPreferences.shared.rememberPassword {
+                    passwordStored = KeychainStore.save(password, for: directory)
+                    if !passwordStored { notice = L10n.tr("无法存入系统钥匙串；请检查钥匙串访问权限。") }
+                } else { passwordStored = false }
+            } catch {
+                notice = error.localizedDescription
+                // Wrong passwords must never overwrite a valid keychain credential.
+                // Lock or index errors leave the saved credential intact.
+                if fromKeychain && error.localizedDescription == "密码不正确" {
+                    KeychainStore.delete(for: directory)
+                    passwordStored = false
+                }
+            }
             busy = false; task = nil
         }
         #endif
     }
+    /// Reopens the vault from the keychain when the user asked to remember the
+    /// password. Attempted once per directory; any failure falls back to the form.
+    func autoUnlockIfNeeded() {
+        #if !TAS_UI_PREVIEW
+        guard vault == nil, !busy, configured, AppPreferences.shared.rememberPassword else { return }
+        let directory = directory
+        let identity = KeychainStore.account(for: directory)
+        guard autoUnlockAttemptedDirectory != identity else { return }
+        autoUnlockAttemptedDirectory = identity
+        guard let password = KeychainStore.read(for: directory) else { return }
+        passwordStored = true
+        open(password: password, token: nil, chat: nil, endpoint: nil, fromKeychain: true)
+        #endif
+    }
+    /// Applies the "remember password" choice. Enabling it stores the password of
+    /// the current session; disabling it removes the stored copy immediately.
+    func setRememberPassword(_ enabled: Bool) {
+        #if !TAS_UI_PREVIEW
+        AppPreferences.shared.rememberPassword = enabled
+        guard enabled else {
+            KeychainStore.delete(for: directory); passwordStored = false; return
+        }
+        guard let sessionPassword else {
+            passwordStored = false
+            notice = L10n.tr("将在下次解锁后记住密码。")
+            return
+        }
+        passwordStored = KeychainStore.save(sessionPassword, for: directory)
+        if !passwordStored { notice = L10n.tr("无法存入系统钥匙串；请检查钥匙串访问权限。") }
+        #endif
+    }
+    func updateRememberedPasswordAfterChange(_ password: String) {
+        sessionPassword = password
+        if AppPreferences.shared.rememberPassword {
+            passwordStored = KeychainStore.save(password, for: directory)
+            if !passwordStored {
+                KeychainStore.delete(for: directory)
+                notice = L10n.tr("密码已更改，但无法存入系统钥匙串；下次需要手动解锁。")
+            }
+        } else {
+            KeychainStore.delete(for: directory)
+            passwordStored = false
+        }
+    }
+    func forgetStoredPassword() {
+        #if !TAS_UI_PREVIEW
+        KeychainStore.delete(for: directory)
+        AppPreferences.shared.rememberPassword = false
+        passwordStored = false
+        if vault != nil { notice = L10n.tr("已忘记保存的密码；下次启动需要重新输入。") }
+        #endif
+    }
     func lock() {
         guard canOperate && historyFile == nil else { return }
+        autoUnlockAttemptedDirectory = KeychainStore.account(for: directory)
         autoSync = false; vault = nil; files = []; bots = []; pending = []; folders = []; logs.clear(); statistics = nil; manifestDate = nil
+        sessionPassword = nil
         L10n.clearMessages()
         selectedFileID = nil; historyFile = nil; historyVersions = []; progress = TransferProgress(L10n.tr("已锁定"))
     }
@@ -176,23 +252,19 @@ import TASCore
     }
     func acceptUploadDrop(_ providers: [NSItemProvider], kind: UploadKind) -> Bool {
         guard canOperate, historyFile == nil, !providers.isEmpty else { return false }
+        // Unlike an open panel, a drag is delivered asynchronously; reserve the
+        // modal slot until every provider is decoded, then release before upload.
         presentingDialog = true
         let session = vault
         Task {
-            defer { presentingDialog = false }
-            var urls: [URL] = []
-            for provider in providers {
-                let url: URL? = await withCheckedContinuation { continuation in
-                    provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                        if let data = item as? Data { continuation.resume(returning: URL(dataRepresentation: data, relativeTo: nil)) }
-                        else { continuation.resume(returning: item as? URL) }
-                    }
-                }
-                guard let url else { notice = L10n.tr("无法读取拖入的文件；未开始上传，请通过选择器重试。"); return }
-                urls.append(url)
+            let urls = await UploadDropLoader.urls(from: providers)
+            guard urls.count == providers.count else {
+                presentingDialog = false
+                notice = L10n.tr("无法读取拖入的文件；未开始上传，请通过选择器重试。")
+                return
             }
             do { try kind.validate(urls) }
-            catch { notice = error.localizedDescription; return }
+            catch { presentingDialog = false; notice = error.localizedDescription; return }
             presentingDialog = false
             if vault === session { upload(urls) }
         }
@@ -213,7 +285,10 @@ import TASCore
     }
     func chooseDirectory() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.directoryURL = directory; panel.prompt = L10n.tr("选择文件库目录")
-        if panel.runModal() == .OK, let url = panel.url { directory = url }
+        if panel.runModal() == .OK, let url = panel.url {
+            directory = url
+            passwordStored = KeychainStore.exists(for: url)
+        }
     }
     func restoreAll() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.prompt = L10n.tr("恢复到此目录")

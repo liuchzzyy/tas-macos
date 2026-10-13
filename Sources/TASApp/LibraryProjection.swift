@@ -29,10 +29,49 @@ struct LibraryProjection {
     }
 }
 
-/// Selection is keyed by persistent file IDs; folder rows never become batch targets.
+/// Selection is keyed by persistent file IDs. File rows resolve to the stored
+/// file they represent; a folder row stands for every stored file below its
+/// logical path, so collapsed and filtered-out rows still resolve.
 enum LibrarySelection {
+    /// Resolves only the file rows that are currently visible; folder rows are
+    /// ignored. Kept for callers that must never widen a selection.
     static func resolve(_ ids: Set<String>, rows: [LibraryRow]) -> [StoredFile] {
         rows.compactMap { ids.contains($0.id) ? $0.node.file : nil }
+    }
+
+    /// Resolves selected rows, including every descendant of selected folders.
+    /// Pass the complete file set (not search-filtered or collapsed rows) so
+    /// operations apply to the entire folder.
+    static func resolve(_ ids: Set<String>, rows: [LibraryRow], allFiles: [StoredFile]) -> [StoredFile] {
+        _ = rows
+        return targets(ids, allFiles: allFiles)
+    }
+
+    /// Target files for a selection: directly selected files plus the subtree of
+    /// every selected folder. Order and identity follow `allFiles`; a file that
+    /// is selected both directly and through a folder appears exactly once.
+    static func targets(_ ids: Set<String>, allFiles: [StoredFile]) -> [StoredFile] {
+        let selected = fileIDs(in: ids)
+        let folders = folderPaths(in: ids)
+        guard !selected.isEmpty || !folders.isEmpty else { return [] }
+        return allFiles.filter { file in
+            selected.contains(file.id) || folders.contains { file.filename.hasPrefix($0 + "/") }
+        }
+    }
+
+    static func fileIDs(in ids: Set<String>) -> Set<Int64> {
+        Set(ids.filter { $0.hasPrefix("file:") }.compactMap { Int64($0.dropFirst("file:".count)) })
+    }
+
+    /// Folder rows are identified by their logical path, never by a record ID.
+    static func folderPaths(in ids: Set<String>) -> [String] {
+        ids.filter { $0.hasPrefix("folder:") }.map { String($0.dropFirst("folder:".count)) }.sorted()
+    }
+
+    /// Writes a hierarchy-preserving destination for every file, refusing paths
+    /// that would escape the chosen directory.
+    static func hierarchicalDestinations(_ files: [StoredFile], in root: URL) throws -> [URL] {
+        try files.map { try Paths.contained($0.filename, in: root) }
     }
 
     static func downloadNames(_ files: [StoredFile]) -> [String] {

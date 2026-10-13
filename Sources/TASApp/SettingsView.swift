@@ -42,6 +42,15 @@ struct SettingsView: View {
                         }
                         Text(L10n.tr("验证当前密码后更换登录密码和后续上传的加密密钥。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Toggle(L10n.tr("在 Apple 钥匙串中记住密码"), isOn: Binding(
+                            get: { preferences.rememberPassword },
+                            set: { model.setRememberPassword($0) }
+                        )).disabled(!model.canOperate)
+                        Text(L10n.tr("仅在这台 Mac 的登录钥匙串中保存；其他能使用你 Mac 账户的程序可能访问。关闭后立即移除保存的密码。"))
+                            .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if model.passwordStored {
+                            Button(L10n.tr("忘记保存的密码")) { model.forgetStoredPassword() }.disabled(!model.canOperate)
+                        }
                     }
                 }
                 LibrarySurface(padding: 16) {
@@ -129,6 +138,7 @@ struct ChangePasswordView: View {
                     let previous = old, proposed = new, repeated = confirmation
                     if model.submitSettingsDialog(L10n.tr("更改登录密码"), operation: { vault, _ in
                         try await vault.changePassword(old: previous, new: proposed, confirmation: repeated)
+                        await MainActor.run { model.updateRememberedPasswordAfterChange(proposed) }
                         return OperationResult(L10n.tr("密码已更改；后续上传使用新一代密钥，已有内容仍使用过去代密钥"))
                     }) { old = ""; new = ""; confirmation = ""; dismiss() }
                 }.buttonStyle(.borderedProminent)

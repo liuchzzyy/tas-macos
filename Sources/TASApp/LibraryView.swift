@@ -14,11 +14,16 @@ struct LibraryView: View {
     @State private var removeTag = false
     @State private var selectedIDs: Set<String> = []
     var filtered: [StoredFile] { model.files.filter { $0.deleted == showDeleted && (search.isEmpty || $0.filename.localizedCaseInsensitiveContains(search) || $0.tags.contains(where: { $0.localizedCaseInsensitiveContains(search) })) } }
+    /// Target files for the current selection. Folder rows contribute their whole
+    /// subtree, including files whose rows are collapsed.
+    var selectedTargets: [StoredFile] {
+        LibrarySelection.targets(selectedIDs, allFiles: model.files.filter { $0.deleted == showDeleted })
+    }
+    var selectedFolders: [String] { LibrarySelection.folderPaths(in: selectedIDs) }
     var selection: StoredFile? {
-        guard selectedIDs.count == 1, let id = selectedIDs.first else { return nil }
+        guard selectedIDs.count == 1, let id = selectedIDs.first, id.hasPrefix("file:") else { return nil }
         return filtered.first { "file:\($0.id)" == id }
     }
-    var selectedFiles: [StoredFile] { filtered.filter { selectedIDs.contains("file:\($0.id)") } }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
@@ -47,15 +52,18 @@ struct LibraryView: View {
                         TextField(L10n.tr("搜索文件名或标签"), text: $search)
                             .textFieldStyle(.roundedBorder).frame(width: 225)
                     }
-                    if selectedFiles.count > 1 {
+                    if selectedIDs.count > 1 {
                         HStack(spacing: 9) {
-                            Text(L10n.tr("已选择 %@ 个文件", String(describing: selectedFiles.count)))
+                            Text(selectedFolders.isEmpty
+                                 ? L10n.tr("已选择 %@ 个文件", String(describing: selectedTargets.count))
+                                 : L10n.tr("已选择 %@ 项 · %@ 个文件", String(describing: selectedIDs.count), String(describing: selectedTargets.count)))
                                 .font(LibraryStyle.helper).foregroundStyle(.secondary)
                             Spacer(minLength: 12)
-                            Button { model.downloadFiles(selectedFiles) } label: { Label(L10n.tr("下载所选…"), systemImage: "arrow.down.to.line") }
-                            Button(role: .destructive) { model.deleteFiles(selectedFiles, permanently: showDeleted) } label: {
+                            Button { model.downloadFiles(selectedTargets, preservesHierarchy: !selectedFolders.isEmpty) } label: { Label(L10n.tr("下载所选…"), systemImage: "arrow.down.to.line") }
+                                .disabled(selectedTargets.isEmpty)
+                            Button(role: .destructive) { model.deleteFiles(selectedTargets, permanently: showDeleted) } label: {
                                 Label(showDeleted ? L10n.tr("永久清除所选…") : L10n.tr("删除所选并保留历史…"), systemImage: "trash")
-                            }
+                            }.disabled(selectedTargets.isEmpty)
                         }.disabled(!model.canOperate || model.historyFile != nil)
                         Divider()
                     } else if let selection {
@@ -76,8 +84,23 @@ struct LibraryView: View {
                                 .help(L10n.tr("更多文件操作")).accessibilityLabel(L10n.tr("更多文件操作")).disabled(!model.canUseSelection)
                         }
                         Divider()
+                    } else if let folder = selectedFolders.first {
+                        HStack(spacing: 9) {
+                            Label(folder, systemImage: "folder").font(LibraryStyle.helper).foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.middle).help(folder)
+                                .accessibilityLabel(L10n.tr("已选文件夹：%@", String(describing: folder)))
+                            Text(L10n.tr("%@ 个文件", String(describing: selectedTargets.count)))
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            Spacer(minLength: 12)
+                            Button { model.downloadFiles(selectedTargets, preservesHierarchy: true) } label: { Label(L10n.tr("下载文件夹…"), systemImage: "arrow.down.to.line") }
+                                .disabled(selectedTargets.isEmpty)
+                            Button(role: .destructive) { model.deleteFiles(selectedTargets, permanently: showDeleted) } label: {
+                                Label(showDeleted ? L10n.tr("永久清除文件夹内全部文件…") : L10n.tr("删除文件夹内全部文件…"), systemImage: "trash")
+                            }.disabled(selectedTargets.isEmpty)
+                        }.disabled(!model.canOperate || model.historyFile != nil)
+                        Divider()
                     } else {
-                        Text(model.vault == nil ? L10n.tr("预览模式下不读取文件或提供操作") : (showDeleted ? L10n.tr("选择文件查看历史并恢复") : L10n.tr("选择文件以下载、查看历史或管理标签")))
+                        Text(model.vault == nil ? L10n.tr("预览模式下不读取文件或提供操作") : (showDeleted ? L10n.tr("选择文件或文件夹查看历史并恢复") : L10n.tr("选择文件或文件夹以下载、查看历史或管理标签")))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary)
                     }
                     if model.vault == nil {
@@ -97,8 +120,8 @@ struct LibraryView: View {
                                 .font(LibraryStyle.body).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 40)
                     } else {
-                        FileHierarchyView(files: filtered, search: search, selectedIDs: $selectedIDs,
-                                          batchDownload: { model.downloadFiles($0) },
+                        FileHierarchyView(files: filtered, allFiles: model.files.filter { $0.deleted == showDeleted }, search: search, selectedIDs: $selectedIDs,
+                                          batchDownload: { model.downloadFiles($0, preservesHierarchy: $1) },
                                           batchDelete: { model.deleteFiles($0, permanently: showDeleted) }) { file in
                             tagging = file; model.presentingDialog = true
                         }
@@ -108,7 +131,10 @@ struct LibraryView: View {
         }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .tasCanvas()
         .onChange(of: filtered.map(\.id)) { _, ids in
-            selectedIDs = selectedIDs.intersection(Set(ids.map { "file:\($0)" }))
+            let visibleFiles = Set(ids.map { "file:\($0)" })
+            let visibleFolders = Set(LibraryTree.visibleRows(LibraryTree.build(filtered), expanded: [], expandAll: true)
+                .filter { $0.node.isFolder }.map(\.id))
+            selectedIDs = selectedIDs.intersection(visibleFiles.union(visibleFolders))
             if let id = model.selectedFileID, !ids.contains(id) { model.selectedFileID = nil }
         }
         .onDisappear { selectedIDs = []; model.selectedFileID = nil }
@@ -126,8 +152,11 @@ struct LibraryView: View {
 }
 
 @MainActor extension AppModel {
-    func downloadFiles(_ selected: [StoredFile]) {
-        guard canOperate, historyFile == nil, selected.count > 1 else { return }
+    /// Downloads a resolved selection. A selection built from folder rows keeps the
+    /// stored hierarchy under the chosen directory; a flat file selection keeps the
+    /// disambiguated leaf names.
+    func downloadFiles(_ selected: [StoredFile], preservesHierarchy: Bool = false) {
+        guard canOperate, historyFile == nil, !selected.isEmpty else { return }
         let ids = Set(selected.map(\.id))
         let targets = files.filter { ids.contains($0.id) && $0.deleted == selected[0].deleted }
         guard targets.count == ids.count else { return }
@@ -138,7 +167,13 @@ struct LibraryView: View {
         let response = panel.runModal()
         presentingDialog = false
         guard response == .OK, let root = panel.url else { return }
-        let destinations = LibrarySelection.downloadNames(targets).map { root.appendingPathComponent($0) }
+        let destinations: [URL]
+        if preservesHierarchy {
+            do { destinations = try LibrarySelection.hierarchicalDestinations(targets, in: root) }
+            catch { notice = error.localizedDescription; return }
+        } else {
+            destinations = LibrarySelection.downloadNames(targets).map { root.appendingPathComponent($0) }
+        }
         guard destinations.allSatisfy({ !FileManager.default.fileExists(atPath: $0.path) }) else {
             notice = L10n.tr("下载目录中已有同名文件；未开始下载。请另选目录。")
             return
@@ -154,7 +189,7 @@ struct LibraryView: View {
     }
 
     func deleteFiles(_ selected: [StoredFile], permanently: Bool) {
-        guard canOperate, historyFile == nil, selected.count > 1 else { return }
+        guard canOperate, historyFile == nil, !selected.isEmpty else { return }
         let ids = Set(selected.map(\.id))
         let targets = files.filter { ids.contains($0.id) && $0.deleted == permanently }
         guard targets.count == ids.count else { return }

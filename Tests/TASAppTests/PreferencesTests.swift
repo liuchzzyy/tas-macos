@@ -20,6 +20,17 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(AppPreferences(defaults: defaults).appearance, .system)
         XCTAssertEqual(AppPreferences(defaults: defaults).language, .chinese)
     }
+    @MainActor func testRememberChoiceDefaultsOffAndPersists() {
+        let suite = "TASPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferences(defaults: defaults)
+        XCTAssertFalse(preferences.rememberPassword)
+        preferences.rememberPassword = true
+        XCTAssertTrue(AppPreferences(defaults: defaults).rememberPassword)
+        preferences.rememberPassword = false
+        XCTAssertFalse(AppPreferences(defaults: defaults).rememberPassword)
+    }
     func testExplicitLocalizationPreservesInterpolatedUserContentAndBotIDs() {
         XCTAssertEqual(L10n.tr("文件同步", language: .english), "File Sync")
         XCTAssertEqual(L10n.tr("文件夹同步", language: .english), "Folder Sync")

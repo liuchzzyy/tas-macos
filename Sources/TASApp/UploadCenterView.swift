@@ -1,5 +1,6 @@
 #if os(macOS)
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 
 struct UploadCenterView: View {
@@ -55,34 +56,97 @@ struct UploadInputError: LocalizedError {
     }
 }
 
+/// Finder advertises a dragged item as `public.file-url`, but other sources offer
+/// only `public.url`, and the payload arrives either as a URL object or as encoded
+/// URL data. Every combination is read before a drop is declared unreadable.
+enum UploadDropLoader {
+    /// Returns one URL per readable provider. A short result means at least one
+    /// provider could not be read, so the caller refuses the whole batch.
+    static func urls(from providers: [NSItemProvider]) async -> [URL] {
+        var urls: [URL] = []
+        for provider in providers {
+            guard let url = await url(from: provider) else { return urls }
+            urls.append(url)
+        }
+        return urls
+    }
+
+    static func url(from provider: NSItemProvider) async -> URL? {
+        for identifier in [UTType.fileURL.identifier, UTType.url.identifier]
+        where provider.hasItemConformingToTypeIdentifier(identifier) {
+            let item: NSSecureCoding? = await withCheckedContinuation { (continuation: CheckedContinuation<NSSecureCoding?, Never>) in
+                provider.loadItem(forTypeIdentifier: identifier, options: nil) { item, _ in
+                    continuation.resume(returning: item)
+                }
+            }
+            if let url = url(from: item) { return url }
+        }
+        return nil
+    }
+
+    static func url(from item: NSSecureCoding?) -> URL? {
+        let url: URL?
+        switch item {
+        case let value as URL: url = value
+        case let value as NSURL: url = value as URL
+        case let data as Data: url = URL(dataRepresentation: data, relativeTo: nil)
+        default: url = nil
+        }
+        guard let url, url.isFileURL else { return nil }
+        return url
+    }
+}
+
+/// A dedicated one-time upload target. It stays hit-testable while unavailable so a
+/// drop reports why it was refused instead of disappearing without feedback.
 struct UploadDropZone: View {
     @ObservedObject private var preferences = AppPreferences.shared
     @EnvironmentObject private var model: AppModel
     let kind: UploadKind
     @State private var targeted = false
-    var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 3) {
-                Image(systemName: "doc.badge.plus")
-                if kind == .filesAndFolders { Image(systemName: "folder.badge.plus") }
-            }
-            .font(.title2).foregroundStyle(TASDesign.accent)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(kind == .folders ? L10n.tr("拖入文件夹，一次性上传") : kind == .files ? L10n.tr("将文件拖到这里") : L10n.tr("将文件或文件夹拖到这里"))
-                    .font(LibraryStyle.body)
-                Text(kind == .folders ? L10n.tr("保留目录层级；跳过隐藏项，不保存空目录，不加入持续同步。") : kind == .files ? L10n.tr("仅接受普通文件") : L10n.tr("一次性上传，不添加同步目录"))
-                    .font(LibraryStyle.helper).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
+    private var acceptsInput: Bool { model.canOperate && model.historyFile == nil }
+    private var title: String {
+        switch kind {
+        case .folders: L10n.tr("拖入文件夹，一次性上传")
+        case .files: L10n.tr("将文件拖到这里")
+        case .filesAndFolders: L10n.tr("将文件或文件夹拖到这里")
         }
-        .padding(12).frame(maxWidth: .infinity, minHeight: 64)
-        .background(targeted ? TASDesign.selected : TASDesign.dropZone, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(targeted ? TASDesign.accent : TASDesign.dropBorder, style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: [6])))
-        .contentShape(Rectangle())
-        .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { model.acceptUploadDrop($0, kind: kind) }
+    }
+    private var detail: String {
+        switch kind {
+        case .folders: L10n.tr("保留目录层级；跳过隐藏项，不保存空目录，不加入持续同步。")
+        case .files: L10n.tr("仅接受普通文件")
+        case .filesAndFolders: L10n.tr("一次性上传，保留文件夹层级；不加入持续同步")
+        }
+    }
+    var body: some View {
+        VStack(spacing: 9) {
+            ZStack {
+                Circle().fill(TASDesign.selected).frame(width: 44, height: 44)
+                HStack(spacing: 2) {
+                    Image(systemName: "doc.badge.plus")
+                    if kind != .files { Image(systemName: "folder.badge.plus") }
+                }.font(.system(size: 15, weight: .medium)).foregroundStyle(TASDesign.accent)
+            }
+            VStack(spacing: 3) {
+                Text(title).font(LibraryStyle.body.weight(.medium))
+                Text(detail).font(LibraryStyle.helper).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(L10n.tr("或点击此处选择")).font(.caption).foregroundStyle(TASDesign.accent)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 18).padding(.vertical, 16)
+        .background(targeted ? TASDesign.selected : TASDesign.dropZone, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .strokeBorder(targeted ? TASDesign.accent : TASDesign.dropBorder,
+                          style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: [6])))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .opacity(acceptsInput ? 1 : 0.55)
+        .onTapGesture { if acceptsInput { model.chooseUpload() } }
+        .onDrop(of: [UTType.fileURL, UTType.url], isTargeted: $targeted) { model.acceptUploadDrop($0, kind: kind) }
         .accessibilityElement(children: .combine)
-        .disabled(!model.canOperate || model.historyFile != nil)
+        .accessibilityHint(acceptsInput ? L10n.tr("点击选择上传内容") : L10n.tr("文件库未就绪；请先解锁"))
     }
 }
 #endif

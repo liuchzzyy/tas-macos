@@ -12,13 +12,17 @@ enum AppAppearance: String, CaseIterable {
     static let shared = AppPreferences()
     static let languageKey = "TAS.interfaceLanguage"
     static let appearanceKey = "TAS.interfaceAppearance"
+    static let rememberPasswordKey = "TAS.rememberPassword"
     private let defaults: UserDefaults
     @Published var language: AppLanguage { didSet { defaults.set(language.rawValue, forKey: Self.languageKey) } }
     @Published var appearance: AppAppearance { didSet { defaults.set(appearance.rawValue, forKey: Self.appearanceKey) } }
+    /// Off by default: storing the vault password in the keychain is opt-in.
+    @Published var rememberPassword: Bool { didSet { defaults.set(rememberPassword, forKey: Self.rememberPasswordKey) } }
     init(defaults: UserDefaults = L10n.defaults) {
         self.defaults = defaults
         language = AppLanguage(rawValue: defaults.string(forKey: Self.languageKey) ?? "") ?? .chinese
         appearance = AppAppearance(rawValue: defaults.string(forKey: Self.appearanceKey) ?? "") ?? .system
+        rememberPassword = defaults.bool(forKey: Self.rememberPasswordKey)
     }
 }
 

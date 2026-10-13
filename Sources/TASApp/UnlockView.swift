@@ -29,6 +29,13 @@ struct UnlockView: View {
                     TextField(L10n.tr("自定义 Bot API 地址（可选）"), text: $endpoint)
                 }
                 SecureField(L10n.tr("加密密码"), text: $password).onSubmit(submit)
+                Toggle(L10n.tr("在 Apple 钥匙串中记住密码"), isOn: Binding(
+                    get: { preferences.rememberPassword },
+                    set: { model.setRememberPassword($0) }
+                ))
+                .font(.callout)
+                Text(L10n.tr("仅在这台 Mac 的登录钥匙串中保存；其他能使用你 Mac 账户的程序可能访问。关闭后立即移除保存的密码。"))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if !model.configured {
                     VStack(alignment: .leading, spacing: 5) {
                         ForEach(PasswordPolicy.checks(password), id: \.0) { rule in
@@ -52,6 +59,8 @@ struct UnlockView: View {
                 Text(L10n.tr("旧版默认使用 ~/.tas。请保管好密码和 config.json，它们用于解密与恢复索引。")).font(.caption).foregroundStyle(.secondary).lineSpacing(3)
             }.textFieldStyle(.roundedBorder).frame(width: 340).padding(32).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
         }.padding(44).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { model.autoUnlockIfNeeded() }
+        .onChange(of: model.directory) { _, _ in model.autoUnlockIfNeeded() }
     }
     private func submit() {
         if !model.configured && !PasswordPolicy.isValid(password) { model.notice = L10n.tr("密码尚未满足全部要求"); return }

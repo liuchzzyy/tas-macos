@@ -44,6 +44,40 @@ final class LibraryProjectionTests: XCTestCase {
         cache.update(files: [file(2, "a/two.txt")], expanded: [], expandAll: true)
         XCTAssertEqual(LibrarySelection.resolve(["file:1", "file:2"], rows: cache.rows).map(\.id), [2])
     }
+    func testSelectingFolderResolvesAllDescendantFilesIncludingCollapsedRows() {
+        let files = [file(1, "a/one.txt"), file(2, "a/nested/two.txt"), file(3, "outside.txt")]
+        var cache = LibraryProjection()
+        cache.update(files: files, expanded: [], expandAll: false)
+        let selection = LibrarySelection.resolve(["folder:a"], rows: cache.rows, allFiles: files)
+        XCTAssertEqual(selection.map(\.id), [1, 2])
+    }
+
+    func testSelectingFolderAndFileDeduplicatesTargets() {
+        let files = [file(1, "a/one.txt"), file(2, "a/two.txt")]
+        var cache = LibraryProjection()
+        cache.update(files: files, expanded: ["a"], expandAll: false)
+        let selection = LibrarySelection.resolve(["folder:a", "file:1"], rows: cache.rows, allFiles: files)
+        XCTAssertEqual(selection.map(\.id), [1, 2])
+    }
+
+    func testFolderSelectionIncludesFilesHiddenBySearch() {
+        let all = [file(1, "a/matched.txt"), file(2, "a/hidden.txt"), file(3, "other.txt")]
+        var cache = LibraryProjection()
+        cache.update(files: [all[0]], expanded: [], expandAll: true)
+        XCTAssertEqual(LibrarySelection.resolve(["folder:a"], rows: cache.rows, allFiles: all).map(\.id), [1, 2])
+    }
+    func testFolderTargetsDoNotIncludeSiblingWithSamePrefix() {
+        let files = [file(1, "a/one.txt"), file(2, "archive/two.txt")]
+        let targets = LibrarySelection.targets(["folder:a"], allFiles: files)
+        XCTAssertEqual(targets.map(\.id), [1])
+    }
+    func testFolderDownloadKeepsHierarchy() throws {
+        let files = [file(1, "a/one.txt"), file(2, "a/nested/two.txt")]
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tas-hierarchy-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertEqual(try LibrarySelection.hierarchicalDestinations(files, in: root).map(\.path),
+                       [root.appendingPathComponent("a/one.txt").path, root.appendingPathComponent("a/nested/two.txt").path])
+    }
     func testBatchDownloadNamesDisambiguateSameLeafAndPreserveIDs() {
         let files = [file(1, "a/report.txt"), file(2, "b/report.txt")]
         XCTAssertEqual(LibrarySelection.downloadNames(files), ["report-1.txt", "report-2.txt"])

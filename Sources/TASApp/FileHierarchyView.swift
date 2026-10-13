@@ -2,14 +2,16 @@
 import SwiftUI
 import TASCore
 
-/// Folder rows are a projection only; file actions always use stable stored IDs.
+/// Folder rows are a projection only: selecting one resolves to every stored file
+/// below its path, and file actions always use stable stored IDs.
 struct FileHierarchyView: View {
     @ObservedObject private var preferences = AppPreferences.shared
     @EnvironmentObject private var model: AppModel
     let files: [StoredFile]
+    let allFiles: [StoredFile]
     let search: String
     @Binding var selectedIDs: Set<String>
-    let batchDownload: ([StoredFile]) -> Void
+    let batchDownload: ([StoredFile], Bool) -> Void
     let batchDelete: ([StoredFile]) -> Void
     let editTags: (StoredFile) -> Void
     @State private var expanded: Set<String> = []
@@ -30,9 +32,8 @@ struct FileHierarchyView: View {
             Table(rows, selection: Binding<Set<String>>(
                 get: { selectedIDs },
                 set: { ids in
-                    selectedIDs = ids.intersection(Set(rows.compactMap { $0.node.file == nil ? nil : $0.id }))
-                    let targets = LibrarySelection.resolve(selectedIDs, rows: rows)
-                    model.selectedFileID = targets.count == 1 ? targets.first?.id : nil
+                    selectedIDs = ids.intersection(Set(rows.map(\.id)))
+                    publishSelection()
                 }
             )) {
                 TableColumn(L10n.tr("名称")) { row in
@@ -73,40 +74,62 @@ struct FileHierarchyView: View {
                 }.width(120)
             }
             .contextMenu(forSelectionType: String.self) { ids in
-                let targets = LibrarySelection.resolve(ids, rows: rows)
-                if targets.count > 1 {
-                    Button(L10n.tr("下载所选…")) { batchDownload(targets) }
-                    Divider()
-                    Button(targets[0].deleted ? L10n.tr("永久清除所选…") : L10n.tr("删除所选并保留历史…"), role: .destructive) { batchDelete(targets) }
-                } else if let file = targets.first {
-                    Button(L10n.tr("下载…")) { model.download(file) }
-                    Button(file.deleted ? L10n.tr("查看历史并恢复…") : L10n.tr("版本历史…")) { model.showHistory(file) }
-                    if !file.deleted {
-                        Button(L10n.tr("编辑标签…")) { editTags(file) }
-                        Button(L10n.tr("恢复自动同步…")) { model.resumeFileSync(file) }.disabled(!file.syncPaused)
-                    }
-                    Divider()
-                    Button(file.deleted ? L10n.tr("永久清除…") : L10n.tr("删除并保留历史…"), role: .destructive) { model.deleteFile(file, permanently: file.deleted) }
-                }
+                selectionMenu(ids)
             } primaryAction: { ids in
-                if let id = ids.first, let node = rows.first(where: { $0.id == id })?.node, node.isFolder, search.isEmpty { toggle(node.path) }
+                if ids.count == 1, let id = ids.first, let node = rows.first(where: { $0.id == id })?.node, node.isFolder, search.isEmpty { toggle(node.path) }
             }
             .disabled(!model.canOperate)
-            .onChange(of: rows.map(\.id)) { _, ids in
-                selectedIDs = selectedIDs.intersection(Set(ids.filter { $0.hasPrefix("file:") }))
-                if let id = model.selectedFileID, !ids.contains("file:\(id)") { model.selectedFileID = nil }
-            }
+            .onChange(of: rows.map(\.id)) { _, _ in clampSelection() }
         }
         .onChange(of: files, initial: true) { _, _ in updateProjection() }
         .onChange(of: expanded) { _, _ in updateProjection() }
         .onChange(of: search.isEmpty) { _, _ in updateProjection() }
     }
 
+    @ViewBuilder
+    private func selectionMenu(_ ids: Set<String>) -> some View {
+        let folders = LibrarySelection.folderPaths(in: ids)
+        let targets = LibrarySelection.targets(ids, allFiles: allFiles)
+        if ids.count == 1, let folder = folders.first {
+            Button(L10n.tr("展开或折叠")) { toggle(folder) }.disabled(!search.isEmpty)
+            Button(L10n.tr("下载文件夹…")) { batchDownload(targets, true) }.disabled(targets.isEmpty)
+            Divider()
+            Button(targets.first?.deleted == true ? L10n.tr("永久清除文件夹内全部文件…") : L10n.tr("删除文件夹内全部文件…"), role: .destructive) {
+                batchDelete(targets)
+            }.disabled(targets.isEmpty)
+        } else if targets.count == 1, let file = targets.first {
+            Button(L10n.tr("下载…")) { model.download(file) }
+            Button(file.deleted ? L10n.tr("查看历史并恢复…") : L10n.tr("版本历史…")) { model.showHistory(file) }
+            if !file.deleted {
+                Button(L10n.tr("编辑标签…")) { editTags(file) }
+                Button(L10n.tr("恢复自动同步…")) { model.resumeFileSync(file) }.disabled(!file.syncPaused)
+            }
+            Divider()
+            Button(file.deleted ? L10n.tr("永久清除…") : L10n.tr("删除并保留历史…"), role: .destructive) { model.deleteFile(file, permanently: file.deleted) }
+        } else if targets.count > 1 {
+            Button(L10n.tr("下载所选…")) { batchDownload(targets, !folders.isEmpty) }
+            Divider()
+            Button(targets[0].deleted ? L10n.tr("永久清除所选…") : L10n.tr("删除所选并保留历史…"), role: .destructive) { batchDelete(targets) }
+        }
+    }
+
+    /// Folder rows stay selectable, so a lone file is what drives the single-file tools.
+    private func publishSelection() {
+        let targets = LibrarySelection.targets(selectedIDs, allFiles: allFiles)
+        let filesOnly = selectedIDs.allSatisfy { $0.hasPrefix("file:") }
+        let next: StoredFile.ID? = filesOnly && targets.count == 1 ? targets.first?.id : nil
+        if model.selectedFileID != next { model.selectedFileID = next }
+    }
+
+    private func clampSelection() {
+        let clamped = selectedIDs.intersection(Set(projection.rows.map(\.id)))
+        if clamped != selectedIDs { selectedIDs = clamped }
+        publishSelection()
+    }
+
     private func updateProjection() {
         projection.update(files: files, expanded: expanded, expandAll: !search.isEmpty)
-        selectedIDs = selectedIDs.intersection(Set(projection.rows.compactMap { $0.node.file == nil ? nil : $0.id }))
-        let targets = LibrarySelection.resolve(selectedIDs, rows: projection.rows)
-        model.selectedFileID = targets.count == 1 ? targets.first?.id : nil
+        clampSelection()
     }
 
     private func toggle(_ path: String) {
