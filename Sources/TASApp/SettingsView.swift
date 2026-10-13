@@ -13,11 +13,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.tr("设置")).font(LibraryStyle.pageTitle)
-                    Text(L10n.tr("管理文件库、连接与恢复。"))
-                        .font(LibraryStyle.body).foregroundStyle(.secondary)
-                }
+                Text(L10n.tr("设置")).font(LibraryStyle.pageTitle)
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(L10n.tr("启动与窗口")).font(LibraryStyle.sectionTitle)
@@ -51,7 +47,7 @@ struct SettingsView: View {
                                 Text(L10n.tr("保留在菜单栏")).tag(AppCloseBehavior.menuBar)
                             }.labelsHidden().frame(width: 175)
                         }
-                        Text(L10n.tr("关闭窗口后选择保留在菜单栏时，文件库仍保持解锁并可继续同步；在菜单栏中选择退出才会结束。"))
+                        Text(L10n.tr("保留在菜单栏时文件库仍保持解锁，可从菜单栏退出。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary)
                     }
                 }
@@ -77,13 +73,13 @@ struct SettingsView: View {
                             Spacer()
                             Button(L10n.tr("更改密码…")) { if model.beginSettingsDialog() { changingPassword = true } }.disabled(!model.canOperate)
                         }
-                        Text(L10n.tr("验证当前密码后更换登录密码和后续上传的加密密钥。"))
+                        Text(L10n.tr("验证当前密码后更换加密密钥。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Toggle(L10n.tr("在 Apple 钥匙串中记住密码"), isOn: Binding(
                             get: { preferences.rememberPassword },
                             set: { model.setRememberPassword($0) }
                         )).disabled(!model.canOperate)
-                        Text(L10n.tr("仅在这台 Mac 的登录钥匙串中保存；其他能使用你 Mac 账户的程序可能访问。关闭后立即移除保存的密码。"))
+                        Text(L10n.tr("仅保存在本机钥匙串；关闭后立即移除。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         if model.passwordStored {
                             Button(L10n.tr("忘记保存的密码")) { model.forgetStoredPassword() }.disabled(!model.canOperate)
@@ -113,7 +109,7 @@ struct SettingsView: View {
                 LibrarySurface(padding: 16) {
                     DisclosureGroup(L10n.tr("恢复与校验")) {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text(L10n.tr("以下操作可能需要较长时间；恢复索引会替换当前索引，请先确认备份状态。"))
+                            Text(L10n.tr("恢复索引会替换当前索引，请先确认备份。"))
                                 .font(LibraryStyle.helper).foregroundStyle(.secondary)
                             Divider()
                             HStack {
@@ -132,7 +128,8 @@ struct SettingsView: View {
                     }
                     .font(LibraryStyle.sectionTitle)
                 }
-            }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(28).frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }.tasCanvas()
             .sheet(isPresented: $addingBot, onDismiss: { model.endSettingsDialog() }) { AddBotView() }
             .sheet(item: $editingBot, onDismiss: { model.endSettingsDialog() }) { bot in EndpointView(bot: bot) }

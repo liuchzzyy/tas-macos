@@ -67,9 +67,11 @@ struct TASSectionLabel: View {
     let title: String
     var body: some View {
         Text(title)
-            .font(.caption.weight(.semibold))
+            .font(.system(size: 10, weight: .semibold))
+            .textCase(.uppercase)
+            .tracking(0.5)
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 19)
             .padding(.bottom, 3)
             .accessibilityAddTraits(.isHeader)
     }
@@ -81,7 +83,7 @@ struct TASCard<Content: View>: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(22)
+            .padding(18)
             .tasCard()
     }
 }

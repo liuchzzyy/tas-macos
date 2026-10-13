@@ -13,16 +13,16 @@ struct UnlockView: View {
     @State private var chat = ""
     @State private var endpoint = ""
     var body: some View {
-        HStack(spacing: 70) {
-            VStack(alignment: .leading, spacing: 22) {
-                Image(systemName: "shippingbox.fill").font(.system(size: 58)).foregroundStyle(.tint)
-                Text(L10n.tr("文件归你。\n随时取回。")).font(.system(size: 40, weight: .semibold)).lineSpacing(7)
+        HStack(spacing: 60) {
+            VStack(alignment: .leading, spacing: 20) {
+                Image(systemName: "shippingbox.fill").font(.system(size: 50)).foregroundStyle(.tint)
+                Text(L10n.tr("文件归你。\n随时取回。")).font(.system(size: 36, weight: .semibold)).lineSpacing(6)
                 Text("TAS for Mac").font(.title3).foregroundStyle(.secondary)
-                Text(L10n.tr("文件在本机加密后上传到 Telegram。\n原生界面，轻装运行。")).foregroundStyle(.secondary).lineSpacing(6)
-            }.frame(width: 355, alignment: .leading)
-            VStack(alignment: .leading, spacing: 18) {
+                Text(L10n.tr("本机加密，上传到 Telegram。")).foregroundStyle(.secondary)
+            }.frame(width: 330, alignment: .leading)
+            VStack(alignment: .leading, spacing: 16) {
                 Text(model.configured ? L10n.tr("解锁文件库") : L10n.tr("创建你的文件库")).font(.title2.bold())
-                Text(model.configured ? L10n.tr("输入现有 TAS 密码，继续访问你的文件。") : L10n.tr("准备好 Telegram 机器人和私聊或群组的 Chat ID。请先向机器人发送 /start。")).foregroundStyle(.secondary).font(.callout).fixedSize(horizontal: false, vertical: true)
+                Text(model.configured ? L10n.tr("输入密码继续。") : L10n.tr("准备 Bot Token 和 Chat ID，并先发送 /start。")).foregroundStyle(.secondary).font(.callout).fixedSize(horizontal: false, vertical: true)
                 if !model.configured {
                     SecureField("Bot Token", text: $token)
                     TextField("Chat ID", text: $chat)
@@ -35,7 +35,7 @@ struct UnlockView: View {
                 ))
                 .font(.callout)
                 Text(L10n.tr("仅在这台 Mac 的登录钥匙串中保存；其他能使用你 Mac 账户的程序可能访问。关闭后立即移除保存的密码。"))
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
                 if !model.configured {
                     VStack(alignment: .leading, spacing: 5) {
                         ForEach(PasswordPolicy.checks(password), id: \.0) { rule in
@@ -56,9 +56,9 @@ struct UnlockView: View {
                 PreferencesControls()
                 Text(L10n.tr("文件库目录")).font(.caption).foregroundStyle(.secondary)
                 HStack { Text(model.directory.path).font(.caption).lineLimit(1).truncationMode(.middle); Spacer(); Button(L10n.tr("更改…")) { model.chooseDirectory() }.disabled(model.busy) }
-                Text(L10n.tr("旧版默认使用 ~/.tas。请保管好密码和 config.json，它们用于解密与恢复索引。")).font(.caption).foregroundStyle(.secondary).lineSpacing(3)
-            }.textFieldStyle(.roundedBorder).frame(width: 340).padding(32).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        }.padding(44).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
+                Text(L10n.tr("请保管好密码和 config.json。")).font(.caption).foregroundStyle(.tertiary)
+            }.textFieldStyle(.roundedBorder).frame(width: 330).padding(28).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }.padding(40).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.autoUnlockIfNeeded() }
         .onChange(of: model.directory) { _, _ in model.autoUnlockIfNeeded() }
     }

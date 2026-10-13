@@ -10,10 +10,7 @@ struct SyncView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.tr("文件同步")).font(LibraryStyle.pageTitle)
-                    Text(L10n.tr("统一上传文件，或持续同步本地文件夹。")).font(LibraryStyle.body).foregroundStyle(.secondary)
-                }
+                Text(L10n.tr("文件同步")).font(LibraryStyle.pageTitle)
                 UploadCenterView()
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -43,8 +40,8 @@ struct SyncView: View {
                             Button(L10n.tr("恢复全部文件…")) { model.restoreAll() }.disabled(!model.canOperate)
                                 .help(L10n.tr("选择目标目录，恢复文件库中的全部文件"))
                         }
-                        Toggle(L10n.tr("应用打开时，每 30 秒检查一次变化"), isOn: $model.autoSync).disabled(!model.canOperate || model.folders.isEmpty)
-                        Text(L10n.tr("新增文件按相对路径上传；修改会创建新版本。本地删除不会删除远端文件。路径冲突会停止本轮同步。历史恢复后，该文件的自动同步会暂停，需在文件列表中手动恢复。"))
+                        Toggle(L10n.tr("每 30 秒自动检查变化"), isOn: $model.autoSync).disabled(!model.canOperate || model.folders.isEmpty)
+                        Text(L10n.tr("新增文件按相对路径上传，修改创建新版本。本地删除不影响远端。路径冲突会暂停本轮同步。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             }.padding(.top, 8)
                         }

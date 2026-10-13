@@ -35,8 +35,6 @@ struct VersionManagementView: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(L10n.tr("版本管理")).font(LibraryStyle.pageTitle).accessibilityAddTraits(.isHeader)
-                    Text(L10n.tr("查看桌面客户端与随应用提供的命令行版本。"))
-                        .font(LibraryStyle.body).foregroundStyle(.secondary)
                 }
                 versionCard(title: L10n.tr("桌面客户端 (GUI)"), icon: "macwindow", installed: guiVersion,
                             latest: latestVersion, detail: L10n.tr("TAS.app · 图形界面"))
@@ -67,7 +65,7 @@ struct VersionManagementView: View {
                             }
                         }
                         if preview { Text(L10n.tr("界面预览 · 不连接网络或文件库；版本来自当前预览应用包")).font(LibraryStyle.helper).foregroundStyle(.secondary) }
-                        else { Text(L10n.tr("CLI 是应用包内的命令行程序，与 GUI 一同更新；不单独替换系统 PATH 中的其他 tas。"))
+                        else { Text(L10n.tr("CLI 随应用包一同更新。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary) }
                     }
                 }

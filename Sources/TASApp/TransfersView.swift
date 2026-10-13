@@ -11,15 +11,12 @@ struct TransfersView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text(L10n.tr("传输任务")).font(LibraryStyle.pageTitle)
-                Text(L10n.tr("中断的上传会保留加密分块，稍后可以继续。"))
-                    .font(LibraryStyle.body).foregroundStyle(.secondary)
                 LibrarySurface {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(L10n.tr("待续传")).font(LibraryStyle.sectionTitle)
-                                Text(L10n.tr("%@ 个任务等待继续", String(describing: model.pending.count))).font(LibraryStyle.helper).foregroundStyle(.secondary)
-                            }
+                            Text(L10n.tr("待续传")).font(LibraryStyle.sectionTitle)
+                            Text("(\(model.pending.count))")
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
                             Spacer()
                             Button(L10n.tr("继续全部上传")) { model.run(L10n.tr("继续上传")) { vault, progress in try await vault.resume(progress: progress) } }
                                 .buttonStyle(.borderedProminent).disabled(!model.canOperate || model.pending.isEmpty)
@@ -44,7 +41,7 @@ struct TransfersView: View {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         Text(L10n.tr("本次会话")).font(LibraryStyle.sectionTitle)
                         Divider()
-                        Text(L10n.tr("仅保留最近 %@ 条记录；较早记录已移除 %@ 条。", String(model.logs.capacity), String(model.logs.discardedCount)))
+                        Text(L10n.tr("最近 %@ 条", String(model.logs.capacity)))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary)
                         if model.logs.entries.isEmpty { Text(L10n.tr("还没有传输记录")).foregroundStyle(.secondary).font(LibraryStyle.body) }
                         ForEach(model.logs.entries) { log in

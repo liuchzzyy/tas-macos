@@ -183,11 +183,11 @@ struct VersionHistoryView: View {
             if let notice = model.notice {
                 Text(L10n.current(notice)).font(LibraryStyle.body).foregroundStyle(.orange).textSelection(.enabled).lineLimit(3)
             }
-            Text(L10n.tr("下载不会更改当前版本；恢复会追加一个新版本并暂停此文件的自动同步。"))
+            Text(L10n.tr("下载不改变当前版本；恢复会追加新版本并暂停自动同步。"))
                 .font(LibraryStyle.helper).foregroundStyle(.secondary)
             TextField(L10n.tr("恢复备注（可选）"), text: $note).textFieldStyle(.roundedBorder).disabled(!model.canOperate)
             HStack {
-                Text(model.busy ? L10n.current(model.progress.message) : L10n.tr("本地源文件不会被恢复操作覆盖。")).font(LibraryStyle.helper).foregroundStyle(.secondary).lineLimit(2)
+                Text(model.busy ? L10n.current(model.progress.message) : L10n.tr("不覆盖本地源文件")).font(LibraryStyle.helper).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 Button(L10n.tr("下载所选版本…")) { if let file, let selection { model.download(file, version: selection.number) } }.disabled(!model.canOperate || selection == nil || file == nil)
                 Button(file?.deleted == true ? L10n.tr("恢复文件为所选版本…") : L10n.tr("恢复为所选版本…")) {

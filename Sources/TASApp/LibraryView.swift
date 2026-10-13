@@ -29,8 +29,6 @@ struct LibraryView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(showDeleted ? L10n.tr("已删除") : L10n.tr("所有文件")).font(LibraryStyle.pageTitle)
-                    Text(showDeleted ? L10n.tr("选择文件并从版本历史中恢复。") : L10n.tr("按文件夹层级查找、管理和取回文件。"))
-                        .font(LibraryStyle.body).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -105,20 +103,20 @@ struct LibraryView: View {
                     }
                     if model.vault == nil {
                         VStack(spacing: 12) {
-                            Image(systemName: "eye").font(.system(size: 36, weight: .light)).foregroundStyle(.secondary)
-                            Text(L10n.tr("界面预览 · 未连接文件库")).font(.system(size: 19, weight: .medium))
-                            Text(L10n.tr("这里不会显示或读取你的实际文件。"))
+                            Image(systemName: "eye").font(.system(size: 30, weight: .light)).foregroundStyle(.secondary)
+                            Text(L10n.tr("界面预览")).font(.system(size: 17, weight: .medium))
+                            Text(L10n.tr("未连接文件库"))
                                 .font(LibraryStyle.body).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 28)
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 24)
                     } else if filtered.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: search.isEmpty ? (showDeleted ? "trash" : "tray.and.arrow.up") : "magnifyingglass")
-                                .font(.system(size: 36, weight: .light)).foregroundStyle(.secondary)
+                                .font(.system(size: 30, weight: .light)).foregroundStyle(.secondary)
                             Text(search.isEmpty ? (showDeleted ? L10n.tr("没有已删除的文件") : L10n.tr("还没有文件")) : L10n.tr("没有找到文件"))
-                                .font(.system(size: 19, weight: .medium))
-                            Text(search.isEmpty ? (showDeleted ? L10n.tr("删除的文件会在这里保留历史，以便恢复。") : L10n.tr("请到“文件同步”上传文件或文件夹。")) : L10n.tr("试试其他文件名或标签。"))
+                                .font(.system(size: 17, weight: .medium))
+                            Text(search.isEmpty ? (showDeleted ? L10n.tr("删除的文件会保留历史。") : L10n.tr("在“文件同步”中上传。")) : L10n.tr("试试其他关键词"))
                                 .font(LibraryStyle.body).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 40)
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 30)
                     } else {
                         FileHierarchyView(files: filtered, allFiles: model.files.filter { $0.deleted == showDeleted }, search: search, selectedIDs: $selectedIDs,
                                           batchDownload: { model.downloadFiles($0, preservesHierarchy: $1) },

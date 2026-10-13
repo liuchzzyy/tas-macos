@@ -55,18 +55,18 @@ struct RootView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 12) {
                             Image(systemName: "shippingbox.fill")
-                                .font(.system(size: 29, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 50, height: 50)
-                                .background(TASDesign.accent, in: RoundedRectangle(cornerRadius: 12))
+                                 .font(.system(size: 24, weight: .semibold))
+                                 .foregroundStyle(.white)
+                                 .frame(width: 42, height: 42)
+                                 .background(TASDesign.accent, in: RoundedRectangle(cornerRadius: 10))
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("TAS").font(.system(size: 30, weight: .bold))
-                                Text(L10n.tr("加密文件库")).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }.padding(.horizontal, 18).padding(.top, 15).padding(.bottom, 17)
-                        ScrollView {
+                                 Text("TAS").font(.system(size: 24, weight: .bold))
+                                 Text(L10n.tr("加密文件库")).font(.caption2).foregroundStyle(.tertiary)
+                             }
+                         }.padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 14)
+                         ScrollView {
                         VStack(alignment: .leading, spacing: 3) {
-                            TASSectionLabel(title: L10n.tr("工作台"))
+                            TASSectionLabel(title: L10n.tr("工作台")).padding(.top, 2)
                             sidebarItem(L10n.tr("概览"), icon: "square.grid.2x2", id: "overview")
                             TASSectionLabel(title: L10n.tr("文件管理")).padding(.top, 8)
                             sidebarItem(L10n.tr("所有文件"), icon: "folder", id: "files")
@@ -83,31 +83,30 @@ struct RootView: View {
                         Spacer(minLength: 8)
                         HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(model.vault == nil ? L10n.tr("界面预览 · 未连接") : L10n.tr("文件库已解锁"))
-                                    .font(.caption.weight(.semibold)).foregroundStyle(.primary)
-                                Text(model.vault == nil ? L10n.tr("不读取真实文件库") : L10n.tr("%@ 个文件", String(describing: model.activeFiles.count)))
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }.lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                 Text(model.vault == nil ? L10n.tr("未连接") : L10n.tr("已解锁"))
+                                     .font(.caption2.weight(.semibold)).foregroundStyle(.primary)
+                                 Text(model.vault == nil ? "" : L10n.tr("%@ 个文件", String(describing: model.activeFiles.count)))
+                                     .font(.caption2).foregroundStyle(.tertiary)
+                             }.lineLimit(1)
                             Spacer(minLength: 0)
                             Button { model.lock() } label: {
                                 Image(systemName: model.vault == nil ? "lock" : "lock.open.fill")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(TASDesign.accent)
-                                    .frame(width: 34, height: 34)
-                                    .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 9))
-                            }
+                                     .font(.system(size: 13, weight: .medium))
+                                     .foregroundStyle(TASDesign.accent)
+                                     .frame(width: 30, height: 30)
+                                     .background(TASDesign.selected, in: RoundedRectangle(cornerRadius: 8))
+                             }
                             .buttonStyle(.plain)
                             .disabled(!model.canOperate || model.historyFile != nil)
                             .help(model.vault == nil ? L10n.tr("未连接文件库") : L10n.tr("锁定文件库"))
                             .accessibilityLabel(model.vault == nil ? L10n.tr("文件库未连接") : L10n.tr("锁定文件库"))
                         }
-                        .padding(12)
+                        .padding(10)
                         .tasCard(cornerRadius: 11)
-                        .padding(.horizontal, 13)
-                        .padding(.bottom, 13)
-                        Divider().padding(.horizontal, 18)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
                         PreferencesControls()
-                            .padding(.horizontal, 15).padding(.top, 8).padding(.bottom, 10)
+                            .padding(.horizontal, 15).padding(.top, 4).padding(.bottom, 8)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(TASDesign.sidebar)
@@ -128,7 +127,7 @@ struct RootView: View {
                             }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                         Divider()
-                        HStack(spacing: 12) {
+                        HStack(spacing: 10) {
                             if model.busy { ProgressView().controlSize(.small) }
                             else { Image(systemName: model.vault == nil ? "eye" : "checkmark.circle").foregroundStyle(.secondary) }
                             Text(model.vault == nil && isolatedUIPreview ? L10n.tr("界面预览 · 未连接文件库") : L10n.current(model.progress.message)).font(.caption).lineLimit(1)
@@ -137,7 +136,7 @@ struct RootView: View {
                                 if let fraction = model.progress.fraction { ProgressView(value: fraction).frame(minWidth: 80, maxWidth: 150) }
                                 Button(L10n.tr("取消")) { model.cancel() }.controlSize(.small)
                             }
-                        }.padding(.horizontal, 22).frame(height: 43)
+                        }.padding(.horizontal, 18).frame(height: 36)
                     }.tasCanvas()
     }
 

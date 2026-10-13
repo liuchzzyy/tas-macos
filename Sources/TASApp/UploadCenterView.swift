@@ -10,14 +10,14 @@ struct UploadCenterView: View {
         LibrarySurface(padding: 16) {
             VStack(alignment: .leading, spacing: 13) {
                 HStack {
-                    Label(L10n.tr("文件（文件夹）上传"), systemImage: "tray.and.arrow.up").font(LibraryStyle.sectionTitle)
+                    Label(L10n.tr("上传"), systemImage: "tray.and.arrow.up").font(LibraryStyle.sectionTitle)
                     Spacer()
-                    Button(L10n.tr("上传文件或文件夹…"), systemImage: "doc.badge.plus") { model.chooseUpload() }
+                    Button(L10n.tr("选择文件…"), systemImage: "doc.badge.plus") { model.chooseUpload() }
                         .keyboardShortcut("u").buttonStyle(.borderedProminent)
                         .disabled(!model.canOperate || model.historyFile != nil)
                 }
                 UploadDropZone(kind: .filesAndFolders)
-                Text(L10n.tr("文件夹保留名称和层级；跳过隐藏项及空目录，不加入持续同步。同名文件可确认保存为新版本。"))
+                Text(L10n.tr("保留文件夹层级，跳过隐藏项。同名文件可保存为新版本。"))
                     .font(LibraryStyle.helper).foregroundStyle(.secondary)
             }
         }
@@ -108,35 +108,35 @@ struct UploadDropZone: View {
     private var title: String {
         switch kind {
         case .folders: L10n.tr("拖入文件夹，一次性上传")
-        case .files: L10n.tr("将文件拖到这里")
-        case .filesAndFolders: L10n.tr("将文件或文件夹拖到这里")
+        case .files: L10n.tr("拖入文件")
+        case .filesAndFolders: L10n.tr("拖入文件或文件夹")
         }
     }
     private var detail: String {
         switch kind {
-        case .folders: L10n.tr("保留目录层级；跳过隐藏项，不保存空目录，不加入持续同步。")
-        case .files: L10n.tr("仅接受普通文件")
-        case .filesAndFolders: L10n.tr("一次性上传，保留文件夹层级；不加入持续同步")
+        case .folders: L10n.tr("保留层级，跳过隐藏项")
+        case .files: L10n.tr("仅接受文件")
+        case .filesAndFolders: L10n.tr("一次性上传，保留文件夹层级")
         }
     }
     var body: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 8) {
             ZStack {
-                Circle().fill(TASDesign.selected).frame(width: 44, height: 44)
+                Circle().fill(TASDesign.selected).frame(width: 38, height: 38)
                 HStack(spacing: 2) {
                     Image(systemName: "doc.badge.plus")
                     if kind != .files { Image(systemName: "folder.badge.plus") }
-                }.font(.system(size: 15, weight: .medium)).foregroundStyle(TASDesign.accent)
+                }.font(.system(size: 14, weight: .medium)).foregroundStyle(TASDesign.accent)
             }
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 Text(title).font(LibraryStyle.body.weight(.medium))
-                Text(detail).font(LibraryStyle.helper).foregroundStyle(.secondary)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }
-            Text(L10n.tr("或点击此处选择")).font(.caption).foregroundStyle(TASDesign.accent)
+            Text(L10n.tr("点击选择")).font(.caption).foregroundStyle(TASDesign.accent)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 18).padding(.vertical, 16)
+        .padding(.horizontal, 16).padding(.vertical, 14)
         .background(targeted ? TASDesign.selected : TASDesign.dropZone, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12)
             .strokeBorder(targeted ? TASDesign.accent : TASDesign.dropBorder,
