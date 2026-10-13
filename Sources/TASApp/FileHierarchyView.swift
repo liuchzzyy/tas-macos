@@ -8,6 +8,9 @@ struct FileHierarchyView: View {
     @EnvironmentObject private var model: AppModel
     let files: [StoredFile]
     let search: String
+    @Binding var selectedIDs: Set<String>
+    let batchDownload: ([StoredFile]) -> Void
+    let batchDelete: ([StoredFile]) -> Void
     let editTags: (StoredFile) -> Void
     @State private var expanded: Set<String> = []
     @State private var projection = LibraryProjection()
@@ -22,11 +25,15 @@ struct FileHierarchyView: View {
                 Button(L10n.tr("全部展开")) {
                     expanded = projection.folderPaths
                 }.disabled(!search.isEmpty)
-                Button(L10n.tr("全部折叠")) { expanded = []; model.selectedFileID = nil }.disabled(!search.isEmpty)
+                Button(L10n.tr("全部折叠")) { expanded = []; selectedIDs = []; model.selectedFileID = nil }.disabled(!search.isEmpty)
             }.controlSize(.small)
-            Table(rows, selection: Binding<String?>(
-                get: { model.selectedFileID.map { "file:\($0)" } },
-                set: { id in model.selectedFileID = rows.first { $0.id == id }?.node.file?.id }
+            Table(rows, selection: Binding<Set<String>>(
+                get: { selectedIDs },
+                set: { ids in
+                    selectedIDs = ids.intersection(Set(rows.compactMap { $0.node.file == nil ? nil : $0.id }))
+                    let targets = LibrarySelection.resolve(selectedIDs, rows: rows)
+                    model.selectedFileID = targets.count == 1 ? targets.first?.id : nil
+                }
             )) {
                 TableColumn(L10n.tr("名称")) { row in
                     HStack(spacing: 6) {
@@ -66,7 +73,12 @@ struct FileHierarchyView: View {
                 }.width(120)
             }
             .contextMenu(forSelectionType: String.self) { ids in
-                if ids.count == 1, let id = ids.first, let file = rows.first(where: { $0.id == id })?.node.file {
+                let targets = LibrarySelection.resolve(ids, rows: rows)
+                if targets.count > 1 {
+                    Button(L10n.tr("下载所选…")) { batchDownload(targets) }
+                    Divider()
+                    Button(targets[0].deleted ? L10n.tr("永久清除所选…") : L10n.tr("删除所选并保留历史…"), role: .destructive) { batchDelete(targets) }
+                } else if let file = targets.first {
                     Button(L10n.tr("下载…")) { model.download(file) }
                     Button(file.deleted ? L10n.tr("查看历史并恢复…") : L10n.tr("版本历史…")) { model.showHistory(file) }
                     if !file.deleted {
@@ -81,6 +93,7 @@ struct FileHierarchyView: View {
             }
             .disabled(!model.canOperate)
             .onChange(of: rows.map(\.id)) { _, ids in
+                selectedIDs = selectedIDs.intersection(Set(ids.filter { $0.hasPrefix("file:") }))
                 if let id = model.selectedFileID, !ids.contains("file:\(id)") { model.selectedFileID = nil }
             }
         }
@@ -91,9 +104,9 @@ struct FileHierarchyView: View {
 
     private func updateProjection() {
         projection.update(files: files, expanded: expanded, expandAll: !search.isEmpty)
-        if let id = model.selectedFileID, !projection.rows.contains(where: { $0.node.file?.id == id }) {
-            model.selectedFileID = nil
-        }
+        selectedIDs = selectedIDs.intersection(Set(projection.rows.compactMap { $0.node.file == nil ? nil : $0.id }))
+        let targets = LibrarySelection.resolve(selectedIDs, rows: projection.rows)
+        model.selectedFileID = targets.count == 1 ? targets.first?.id : nil
     }
 
     private func toggle(_ path: String) {

@@ -17,12 +17,14 @@ public struct StoredFile: Identifiable, Codable, Hashable, Sendable {
     public let deleted: Bool
     public let syncPaused: Bool
     let objectID: Int64
+    let keyID: String
     init(_ row: JSON, tags: [String] = []) {
         id = number(row["id"]); filename = string(row["filename"]); hash = string(row["hash"])
         originalSize = number(row["original_size"]); storedSize = number(row["stored_size"])
         chunks = Int(number(row["chunks"])); compressed = number(row["compressed"]) != 0
         createdAt = string(row["created_at"]); self.tags = tags
         objectID = row["object_id"] == nil ? id : number(row["object_id"])
+        keyID = string(row["key_id"])
         versionNumber = Int(number(row["version_number"] ?? 1)); versionCount = Int(number(row["version_count"] ?? 1))
         updatedAt = string(row["updated_at"]); deleted = number(row["deleted"]) != 0; syncPaused = number(row["sync_paused"]) != 0
     }
@@ -68,6 +70,11 @@ final class Database {
             try script(String(contentsOf: schema, encoding: .utf8))
             try migrate()
             try versionSchema()
+            for table in ["files", "pending_uploads"] {
+                if !(try rows("PRAGMA table_info(\(table))")).contains(where: { string($0["name"]) == "key_id" }) {
+                    try script("ALTER TABLE \(table) ADD COLUMN key_id TEXT")
+                }
+            }
             try script("CREATE TABLE IF NOT EXISTS manifest_journal(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL)")
             // Separate from mutation recovery: committed uploads must survive cancellation
             // even when there is no pending upload or prepared mutation left to resume.
@@ -203,7 +210,7 @@ final class Database {
         try rows("SELECT l.deleted,l.sync_paused,v.object_id,o.hash,o.original_size,o.chunks FROM logical_files l JOIN file_versions v ON v.id=l.current_version_id JOIN files o ON o.id=v.object_id WHERE l.filename=?", [filename]).first.map(CurrentFileState.init)
     }
     func manifest(includeShares: Bool = false) throws -> JSON {
-        var result: JSON = ["schemaVersion": 2, "logicalFiles": try rows("SELECT * FROM logical_files ORDER BY id"), "versions": try rows("SELECT * FROM file_versions ORDER BY id"), "createdAt": timestamp(), "files": try rows("SELECT * FROM files ORDER BY id"), "chunks": try rows("SELECT * FROM chunks ORDER BY file_id,chunk_index"), "tags": try rows("SELECT * FROM tags ORDER BY id")]
+        var result: JSON = ["schemaVersion": 3, "logicalFiles": try rows("SELECT * FROM logical_files ORDER BY id"), "versions": try rows("SELECT * FROM file_versions ORDER BY id"), "createdAt": timestamp(), "files": try rows("SELECT * FROM files ORDER BY id"), "chunks": try rows("SELECT * FROM chunks ORDER BY file_id,chunk_index"), "tags": try rows("SELECT * FROM tags ORDER BY id")]
         if includeShares { result["shares"] = try rows("SELECT * FROM shares") }
         return result
     }

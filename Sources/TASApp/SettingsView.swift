@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var addingBot = false
     @State private var editingBot: BotInfo?
+    @State private var changingPassword = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -34,6 +35,17 @@ struct SettingsView: View {
                 }
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text(L10n.tr("登录密码")).font(LibraryStyle.sectionTitle)
+                            Spacer()
+                            Button(L10n.tr("更改密码…")) { if model.beginSettingsDialog() { changingPassword = true } }.disabled(!model.canOperate)
+                        }
+                        Text(L10n.tr("验证当前密码后更换登录密码和后续上传的加密密钥。"))
+                            .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                LibrarySurface(padding: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack { Text(L10n.tr("Telegram 机器人")).font(LibraryStyle.sectionTitle); Spacer(); Button(L10n.tr("添加…")) { if model.beginSettingsDialog() { addingBot = true } }.disabled(!model.canOperate) }
                         Divider()
                         if model.bots.isEmpty { Text(L10n.tr("尚未添加机器人")).font(LibraryStyle.body).foregroundStyle(.secondary) }
@@ -53,32 +65,76 @@ struct SettingsView: View {
                     }
                 }
                 LibrarySurface(padding: 16) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(L10n.tr("恢复与校验")).font(LibraryStyle.sectionTitle)
-                        Text(L10n.tr("以下操作可能需要较长时间；恢复索引会替换当前索引，请先确认备份状态。"))
-                            .font(LibraryStyle.helper).foregroundStyle(.secondary)
-                        Divider()
-                        HStack {
-                            Button(L10n.tr("检查连接")) { model.run(L10n.tr("检查连接")) { vault, _ in try await vault.checkBots() } }
-                            Button(L10n.tr("完整校验")) { model.run(L10n.tr("完整校验")) { vault, progress in try await vault.verify(deep: true, progress: progress) } }
-                            Button(L10n.tr("校验全部历史")) { model.run(L10n.tr("校验全部历史")) { vault, progress in try await vault.verify(deep: true, allVersions: true, progress: progress) } }
-                        }.disabled(!model.canOperate)
-                        Divider()
-                        HStack {
-                            Text(L10n.tr("从远端备份替换本机索引")).font(LibraryStyle.body)
-                            Spacer()
-                            Button(L10n.tr("恢复索引…")) { rebuild() }.disabled(!model.canOperate)
+                    DisclosureGroup(L10n.tr("恢复与校验")) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(L10n.tr("以下操作可能需要较长时间；恢复索引会替换当前索引，请先确认备份状态。"))
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            Divider()
+                            HStack {
+                                Button(L10n.tr("检查连接")) { model.run(L10n.tr("检查连接")) { vault, _ in try await vault.checkBots() } }
+                                Button(L10n.tr("完整校验")) { model.run(L10n.tr("完整校验")) { vault, progress in try await vault.verify(deep: true, progress: progress) } }
+                                Button(L10n.tr("校验全部历史")) { model.run(L10n.tr("校验全部历史")) { vault, progress in try await vault.verify(deep: true, allVersions: true, progress: progress) } }
+                            }.disabled(!model.canOperate)
+                            Divider()
+                            HStack {
+                                Text(L10n.tr("从远端备份替换本机索引")).font(LibraryStyle.body)
+                                Spacer()
+                                Button(L10n.tr("恢复索引…")) { rebuild() }.disabled(!model.canOperate)
+                            }
                         }
+                        .font(LibraryStyle.body).padding(.top, 10)
                     }
+                    .font(LibraryStyle.sectionTitle)
                 }
             }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
         }.tasCanvas()
             .sheet(isPresented: $addingBot, onDismiss: { model.endSettingsDialog() }) { AddBotView() }
             .sheet(item: $editingBot, onDismiss: { model.endSettingsDialog() }) { bot in EndpointView(bot: bot) }
+            .sheet(isPresented: $changingPassword, onDismiss: { model.endSettingsDialog() }) { ChangePasswordView() }
     }
     private func rebuild() {
         let alert = NSAlert(); alert.messageText = L10n.tr("从远端恢复索引？"); alert.informativeText = L10n.tr("当前索引会先备份到文件库目录，再由最近一次远端备份替换。尚未进入备份的文件不会显示在恢复后的索引中。"); alert.addButton(withTitle: L10n.tr("备份并恢复")); alert.addButton(withTitle: L10n.tr("取消"))
         if alert.runModal() == .alertFirstButtonReturn { model.run(L10n.tr("恢复索引")) { vault, _ in try await vault.rebuildIndex() } }
+    }
+}
+struct ChangePasswordView: View {
+    @ObservedObject private var preferences = AppPreferences.shared
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var old = ""
+    @State private var new = ""
+    @State private var confirmation = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L10n.tr("更改登录密码")).font(.title2.bold())
+            VStack(alignment: .leading, spacing: 5) {
+                Text(L10n.tr("新上传使用新一代密钥"))
+                Text(L10n.tr("已有内容仍使用过去代密钥"))
+                Text(L10n.tr("旧密码仍可解密旧版密文，不能撤销"))
+            }
+            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            SecureField(L10n.tr("当前密码"), text: $old)
+            SecureField(L10n.tr("新密码"), text: $new)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(PasswordPolicy.checks(new), id: \.0) { rule in
+                    Label(L10n.tr(rule.0), systemImage: rule.1 ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(rule.1 ? Color.green : Color.secondary)
+                }
+            }.font(.caption)
+            SecureField(L10n.tr("确认新密码"), text: $confirmation)
+            HStack {
+                Spacer()
+                Button(L10n.tr("取消")) { dismiss() }
+                Button(L10n.tr("更改密码")) {
+                    let previous = old, proposed = new, repeated = confirmation
+                    if model.submitSettingsDialog(L10n.tr("更改登录密码"), operation: { vault, _ in
+                        try await vault.changePassword(old: previous, new: proposed, confirmation: repeated)
+                        return OperationResult(L10n.tr("密码已更改；后续上传使用新一代密钥，已有内容仍使用过去代密钥"))
+                    }) { old = ""; new = ""; confirmation = ""; dismiss() }
+                }.buttonStyle(.borderedProminent)
+                    .disabled(old.isEmpty || !PasswordPolicy.isValid(new) || new != confirmation || new == old || !model.canSubmitSettingsDialog)
+            }
+        }.textFieldStyle(.roundedBorder).padding(28).frame(width: 440)
     }
 }
 struct AddBotView: View {

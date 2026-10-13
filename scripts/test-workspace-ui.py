@@ -32,7 +32,8 @@ class WorkspaceUIContractTests(unittest.TestCase):
 
     def test_settings_uses_compact_surfaces_at_minimum_height(self):
         settings = section("struct SettingsView:", "struct AddBotView:")
-        self.assertEqual(settings.count("LibrarySurface(padding: 16)"), 3)
+        self.assertGreaterEqual(settings.count("LibrarySurface(padding: 16)"), 3)
+        self.assertIn('DisclosureGroup(L10n.tr("恢复与校验"))', settings)
         self.assertIn("VStack(alignment: .leading, spacing: 14)", settings)
         self.assertIn("VStack(alignment: .leading, spacing: 6)", settings)
 
@@ -46,13 +47,14 @@ class WorkspaceUIContractTests(unittest.TestCase):
         self.assertIn("LibrarySurface(padding: 16)", sync)
         self.assertIn("LibrarySurface(padding: 16)", (APP / "UploadCenterView.swift").read_text())
 
-    def test_sync_separates_one_time_folder_upload_and_continuous_sync(self):
+    def test_sync_unifies_one_time_upload_and_separates_continuous_sync(self):
         sync = section("struct SyncView:", "struct SettingsView:")
         center = (APP / "UploadCenterView.swift").read_text()
-        self.assertIn('Label(L10n.tr("文件上传")', center)
-        self.assertIn('Text(L10n.tr("文件夹上传 · 一次性"))', sync)
-        self.assertIn('Text(L10n.tr("持续同步"))', sync)
-        self.assertLess(sync.index("UploadDropZone(kind: .folders)"), sync.index('Text(L10n.tr("持续同步"))'))
+        self.assertIn('Label(L10n.tr("文件（文件夹）上传")', center)
+        self.assertIn('UploadDropZone(kind: .filesAndFolders)', center)
+        self.assertNotIn('UploadDropZone(kind: .folders)', sync)
+        self.assertIn('Text(L10n.tr("文件夹同步"))', sync)
+        self.assertLess(sync.index("UploadCenterView()"), sync.index('Text(L10n.tr("文件夹同步"))'))
         self.assertNotIn('frame(height: 164', (APP / "DashboardView.swift").read_text())
         self.assertIn('NSColor(name:', (APP / "TASDesign.swift").read_text())
 
@@ -80,12 +82,46 @@ class WorkspaceUIContractTests(unittest.TestCase):
             self.assertIn("if model.submitSettingsDialog(", sheet)
             self.assertIn("model.canSubmitSettingsDialog", sheet)
 
+    def test_password_change_explains_generational_encryption_without_reencrypting_history(self):
+        settings = section("struct ChangePasswordView:", "struct AddBotView:")
+        summary = section("struct SettingsView:", "struct ChangePasswordView:")
+        english = (APP / "Resources/en.lproj/Localizable.strings").read_text()
+        chinese = (APP / "Resources/zh-Hans.lproj/Localizable.strings").read_text()
+        readme = (ROOT / "README.md").read_text()
+        for phrase in ["新上传使用新一代密钥", "已有内容仍使用过去代密钥", "旧密码仍可解密旧版密文，不能撤销"]:
+            self.assertIn(phrase, settings)
+            self.assertIn(f'"{phrase}" = ', english)
+            self.assertIn(f'"{phrase}" = ', chinese)
+        self.assertIn("vault.changePassword(old: previous, new: proposed, confirmation: repeated)", settings)
+        self.assertIn("if model.submitSettingsDialog(", settings)
+        self.assertIn("model.canSubmitSettingsDialog", settings)
+        self.assertIn("model.beginSettingsDialog()", summary)
+        self.assertIn("model.endSettingsDialog()", summary)
+        self.assertIn("新上传使用新一代密钥", readme)
+        self.assertIn("已有内容仍使用过去代密钥", readme)
+        self.assertIn("旧版密文", readme)
+        self.assertNotIn("现有文件、机器人令牌和远端索引继续使用原加密密钥", readme)
+        self.assertNotIn("登录密码已更改；已有密文仍使用原加密密钥", settings)
+
     def test_sidebar_is_compact_with_scrollable_navigation_and_larger_brand(self):
         root = section("struct RootView:", "struct UnlockView:")
         self.assertIn("ScrollView", root, "Navigation must scroll without hiding the footer")
         self.assertIn(".frame(height: 34)", root)
         self.assertIn(".frame(width: 50, height: 50)", root)
         self.assertIn('Text("TAS").font(.system(size: 30, weight: .bold))', root)
+
+    def test_sidebar_sections_and_navigation_have_consistent_left_edge(self):
+        root = (APP / "RootView.swift").read_text()
+        design = (APP / "TASDesign.swift").read_text()
+        self.assertIn('.frame(width: 18, alignment: .center)', root)
+        self.assertIn('.padding(.horizontal, 18)', design.split('struct TASSectionLabel:', 1)[1].split('struct TASCard', 1)[0])
+        self.assertNotIn('Label(title, systemImage: icon)', root)
+
+    def test_upload_and_sync_headings_use_requested_short_names(self):
+        center = (APP / "UploadCenterView.swift").read_text()
+        sync = (APP / "SyncView.swift").read_text()
+        self.assertIn('Label(L10n.tr("文件（文件夹）上传")', center)
+        self.assertIn('Text(L10n.tr("文件夹同步"))', sync)
 
     def test_library_uses_hierarchy_without_losing_stable_file_selection(self):
         library = section("struct LibraryView:", "struct Metric:")
@@ -112,10 +148,9 @@ class WorkspaceUIContractTests(unittest.TestCase):
         self.assertNotIn(".onDrop", sync, "Only dedicated zones may accept drops")
         self.assertNotIn("一次性上传文件夹…", sync, "The redundant one-time folder picker must be removed")
         self.assertNotIn("chooseUpload(folders:", app_source())
-        self.assertIn("UploadDropZone(kind: .folders)", sync)
+        self.assertIn("UploadDropZone(kind: .filesAndFolders)", (APP / "UploadCenterView.swift").read_text())
         center = (APP / "UploadCenterView.swift").read_text()
-        self.assertIn("上传文件", center)
-        self.assertIn("UploadDropZone(kind: .files)", center)
+        self.assertIn("上传文件或文件夹", center)
         self.assertNotIn("chooseNewVersion", center)
         self.assertNotIn("DisclosureGroup", center)
         self.assertNotIn("chooseNewVersion", (APP / "VersionHistoryView.swift").read_text())

@@ -16,15 +16,9 @@ struct SyncView: View {
                 }
                 UploadCenterView()
                 LibrarySurface(padding: 16) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.tr("文件夹上传 · 一次性")).font(LibraryStyle.sectionTitle)
-                        UploadDropZone(kind: .folders)
-                    }
-                }
-                LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text(L10n.tr("持续同步")).font(LibraryStyle.sectionTitle)
+                            Text(L10n.tr("文件夹同步")).font(LibraryStyle.sectionTitle)
                             Spacer()
                             Button(L10n.tr("添加同步目录…")) { model.addFolder() }.disabled(!model.canOperate)
                             Button(L10n.tr("立即同步")) { model.run(L10n.tr("同步文件夹")) { vault, progress in try await vault.sync(progress: progress) } }

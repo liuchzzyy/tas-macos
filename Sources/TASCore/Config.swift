@@ -21,16 +21,29 @@ final class Configuration {
     let url: URL
     var raw: JSON
     var bots: [Bot]
+    private(set) var encryptionPassword: String
+    private(set) var generationID: String
+    private(set) var generations: [String: String]
     init(directory: URL, password: String) throws {
         url = directory.appendingPathComponent("config.json")
         raw = try jsonObject(Data(contentsOf: url))
         try require(try Crypto.verifyPassword(password, hash: string(raw["passwordHash"])), "密码不正确")
+        try require(number(raw["configVersion"]) == 5, "不支持旧版文件库配置")
+        guard let wrapped = raw["wrappedKeyring"] as? String, let data = Data(base64Encoded: wrapped) else { throw TASError("密钥环缺失") }
+        let keyring = try jsonObject(Crypto.decrypt(data, password: password))
+        guard let secret = keyring["manifestKey"] as? String, Self.validSecret(secret),
+              let current = keyring["current"] as? String,
+              let keys = keyring["keys"] as? [String: String], !keys.isEmpty,
+              keys[current] != nil,
+              keys.allSatisfy({ UUID(uuidString: $0.key) != nil && Self.validSecret($0.value) }) else { throw TASError("密钥环无效") }
+        encryptionPassword = secret; generationID = current; generations = keys
         var entries = raw["bots"] as? [JSON] ?? [raw.merging(["id": "primary", "enabled": true]) { _, new in new }]
         for index in entries.indices where string(entries[index]["id"]).isEmpty { entries[index]["id"] = index == 0 ? "primary" : "bot-\(index + 1)" }
+        let cryptoPassword = encryptionPassword
         bots = try entries.map { entry in
             let token: String
             if let plaintext = entry["botToken"] as? String { token = plaintext }
-            else if let value = entry["encryptedBotToken"] as? String, let encrypted = Data(base64Encoded: value), let decrypted = String(data: try Crypto.decrypt(encrypted, password: password), encoding: .utf8) { token = decrypted }
+            else if let value = entry["encryptedBotToken"] as? String, let encrypted = Data(base64Encoded: value), let decrypted = String(data: try Crypto.decrypt(encrypted, password: cryptoPassword), encoding: .utf8) { token = decrypted }
             else { throw TASError("无法解密机器人配置") }
             try Self.validate(id: string(entry["id"]), token: token, chatID: string(entry["chatId"]), endpoint: entry["customApiUrl"] as? String)
             return Bot(raw: entry, token: token)
@@ -48,18 +61,50 @@ final class Configuration {
         try require(PasswordPolicy.isValid(password), "加密密码须至少 12 位，并包含大写、小写字母、数字和符号")
         try validate(id: "primary", token: token, chatID: chatID, endpoint: endpoint)
         try require(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("config.json").path) && !FileManager.default.fileExists(atPath: directory.appendingPathComponent("index.db").path), "此目录已有配置或索引，请解锁现有文件库")
-        var bot: JSON = ["id": "primary", "chatId": chatID, "enabled": true, "encryptedBotToken": try Crypto.encrypt(Data(token.utf8), password: password).base64EncodedString(), "createdAt": timestamp()]
+        var bot: JSON = ["id": "primary", "chatId": chatID, "enabled": true, "createdAt": timestamp()]
         if let endpoint, !endpoint.isEmpty { bot["customApiUrl"] = endpoint }
-        let config: JSON = ["configVersion": 3, "passwordHash": try Crypto.passwordHash(password), "bots": [bot], "createdAt": timestamp()]
+        let generation = UUID().uuidString
+        let manifestKey = Self.randomSecret()
+        bot["encryptedBotToken"] = try Crypto.encrypt(Data(token.utf8), password: manifestKey).base64EncodedString()
+        let ring: JSON = ["manifestKey": manifestKey, "current": generation, "keys": [generation: Self.randomSecret()]]
+        let config: JSON = ["configVersion": 5, "passwordHash": try Crypto.passwordHash(password), "wrappedKeyring": try Crypto.encrypt(jsonData(ring), password: password).base64EncodedString(), "bots": [bot], "createdAt": timestamp()]
         try Paths.atomicWrite(jsonData(config), to: directory.appendingPathComponent("config.json"))
     }
     func save() throws { try Paths.atomicWrite(jsonData(raw), to: url) }
+    private static func randomSecret() -> String {
+        var generator = SystemRandomNumberGenerator()
+        return Data((0..<32).map { _ in UInt8.random(in: 0...255, using: &generator) }).base64EncodedString()
+    }
+    private static func validSecret(_ secret: String) -> Bool {
+        guard let bytes = Data(base64Encoded: secret), bytes.count == 32 else { return false }
+        return bytes.base64EncodedString() == secret
+    }
+    func objectKey(_ id: String) throws -> String {
+        guard let key = generations[id] else { throw TASError("文件加密密钥不存在：\(id)") }
+        return key
+    }
+    /// Commit verifier and encrypted keyring together; remote ciphertext and
+    /// recovery pointer stay usable because the manifest key never rotates.
+    func changePassword(old: String, new: String, confirmation: String) throws {
+        try require(try Crypto.verifyPassword(old, hash: string(raw["passwordHash"])), "密码不正确")
+        try require(PasswordPolicy.isValid(new), "加密密码须至少 12 位，并包含大写、小写字母、数字和符号")
+        try require(new == confirmation, "两次输入的密码不一致")
+        try require(new != old, "新密码不能与旧密码相同")
+        var candidate = raw
+        let nextID = UUID().uuidString
+        var nextKeys = generations; nextKeys[nextID] = Self.randomSecret()
+        let ring: JSON = ["manifestKey": encryptionPassword, "current": nextID, "keys": nextKeys]
+        candidate["passwordHash"] = try Crypto.passwordHash(new)
+        candidate["wrappedKeyring"] = try Crypto.encrypt(jsonData(ring), password: new).base64EncodedString()
+        try Paths.atomicWrite(jsonData(candidate), to: url)
+        raw = candidate; generations = nextKeys; generationID = nextID
+    }
     /// Commit the proposed bot list only after the new config is durable: the
     /// caller's in-memory list and `raw` stay untouched when the write fails.
     func saveBots(password: String, replacing replacement: [Bot]? = nil) throws {
         let botsToSave = replacement ?? bots
         var candidate = raw
-        candidate["configVersion"] = 3
+        candidate["configVersion"] = 5
         candidate["bots"] = try botsToSave.map { bot -> JSON in
             var entry = bot.raw; entry.removeValue(forKey: "botToken")
             if entry["encryptedBotToken"] == nil { entry["encryptedBotToken"] = try Crypto.encrypt(Data(bot.token.utf8), password: password).base64EncodedString() }

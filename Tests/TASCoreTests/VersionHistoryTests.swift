@@ -107,7 +107,7 @@ final class VersionHistoryTests: XCTestCase {
         _ = try await vault.restoreVersion(id, version: 1)
         let db = try Database(directory: directory)
         let manifest = try db.manifest()
-        XCTAssertEqual(number(manifest["schemaVersion"]), 2)
+        XCTAssertEqual(number(manifest["schemaVersion"]), 3)
         let other = try Database(directory: root.appendingPathComponent("copy"))
         try other.importManifest(manifest)
         XCTAssertEqual(try other.history(id).count, 3)
@@ -256,7 +256,7 @@ final class VersionHistoryTests: XCTestCase {
             XCTAssertEqual(try jsonData(db.manifest().filter { $0.key != "createdAt" }), baseline)
         }
     }
-    func testV1ImportPreservesDuplicateNamesTagsAndContent() async throws {
+    func testV1ImportFailsClosedWithoutLegacyCompatibility() async throws {
         let fake = FakeTelegram(), vault = try Vault(directory: directory, password: password, transport: FakeTelegram())
         _ = fake // Content bytes are validated through the transport in other tests.
         _ = try await vault.upload(source("A"), name: "a.txt")
@@ -264,11 +264,9 @@ final class VersionHistoryTests: XCTestCase {
         let db = try Database(directory: directory)
         var legacy = try db.manifest(); legacy["schemaVersion"] = 1; legacy.removeValue(forKey: "logicalFiles"); legacy.removeValue(forKey: "versions")
         legacy["tags"] = [["id": 1, "file_id": 2, "tag": "old", "created_at": "old"]]
-        let copy = try Database(directory: root.appendingPathComponent("v1-copy")); try copy.importManifest(legacy)
-        let files = try copy.files(); XCTAssertEqual(files.count, 2)
-        XCTAssertEqual(Set(files.map(\.filename)).count, 2)
-        XCTAssertEqual(files.first { $0.id == 2 }?.tags, ["old"])
-        XCTAssertEqual(try copy.history(2).first?.source, "migration")
+        let copy = try Database(directory: root.appendingPathComponent("v1-copy"))
+        XCTAssertThrowsError(try copy.importManifest(legacy))
+        XCTAssertTrue(try copy.files().isEmpty)
     }
     func testPurgePreservesSharedContentAndUniqueStorageAccounting() async throws {
         let fake = FakeTelegram(), vault = try Vault(directory: directory, password: password, transport: FakeTelegram())
@@ -297,7 +295,7 @@ final class VersionHistoryTests: XCTestCase {
             try await vault.addBot(id: "alias", token: "456:fixture", chatID: "-1", endpoint: "https://api.telegram.org/")
             try await vault.updateBot("alias", enabled: false)
             let db = try Database(directory: location), a = try db.files()[0]
-            let object = try db.run("INSERT INTO files(filename,hash,original_size,stored_size,chunks,compressed) SELECT 'b.txt',hash,original_size,stored_size,chunks,compressed FROM files WHERE id=?", [a.objectID])
+            let object = try db.run("INSERT INTO files(filename,hash,original_size,stored_size,chunks,compressed,key_id) SELECT 'b.txt',hash,original_size,stored_size,chunks,compressed,key_id FROM files WHERE id=?", [a.objectID])
             try db.run("INSERT INTO chunks(file_id,chunk_index,message_id,file_telegram_id,bot_id,size) SELECT ?,chunk_index,message_id,file_telegram_id,'primary',size FROM chunks WHERE file_id=?", [object, a.objectID])
             try db.run("UPDATE chunks SET bot_id=? WHERE file_id=?", [alias, a.objectID])
             let b = try db.run("INSERT INTO logical_files(filename) VALUES('b.txt')")
@@ -327,42 +325,23 @@ final class VersionHistoryTests: XCTestCase {
         }
         XCTAssertThrowsError(try db.statistics())
     }
-    func testLegacyPendingWithoutSizeColumnsResumesAndRebuilds() async throws {
-        for (uploaded, compressed) in [(false, false), (true, false), (false, true), (true, true)] {
-            let location = root.appendingPathComponent(UUID().uuidString)
-            try Configuration.create(directory: location, password: password, token: "123:fixture", chatID: "-1")
-            let plain = try source("legacy bytes"), encrypted = location.appendingPathComponent("encrypted")
-            try Crypto.encryptFile(plain, to: encrypted, password: password, compressed: compressed)
-            let payload = try Data(contentsOf: encrypted)
-            let chunk = location.appendingPathComponent("chunk")
-            try Paths.atomicWrite(try Crypto.header(index: 0, total: 1, compressed: compressed) + payload, to: chunk)
-            let fake = FakeTelegram()
-            if uploaded {
-                let config = try Configuration(directory: location, password: password)
-                _ = try await fake.send(chunk, caption: "legacy", bot: config.owner(nil))
-                try FileManager.default.removeItem(at: chunk)
-            }
-            // A genuinely old schema, not a modern pending row with a hand-set zero.
-            var connection: OpaquePointer?
-            XCTAssertEqual(sqlite3_open(location.appendingPathComponent("index.db").path, &connection), SQLITE_OK)
-            let sql = """
-            CREATE TABLE pending_uploads(id INTEGER PRIMARY KEY AUTOINCREMENT,filename TEXT NOT NULL,file_path TEXT NOT NULL,hash TEXT NOT NULL,original_size INTEGER NOT NULL,total_chunks INTEGER NOT NULL,uploaded_chunks INTEGER NOT NULL DEFAULT 0,temp_dir TEXT,created_at TEXT NOT NULL DEFAULT 'old');
-            CREATE TABLE pending_chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,pending_id INTEGER NOT NULL,chunk_index INTEGER NOT NULL,chunk_path TEXT NOT NULL,uploaded INTEGER NOT NULL DEFAULT 0,message_id TEXT,file_telegram_id TEXT,FOREIGN KEY(pending_id) REFERENCES pending_uploads(id) ON DELETE CASCADE,UNIQUE(pending_id,chunk_index));
-            INSERT INTO pending_uploads(filename,file_path,hash,original_size,total_chunks,uploaded_chunks) VALUES('legacy.bin','unused','\(try Crypto.hashFile(plain))',12,1,\(uploaded ? 1 : 0));
-            INSERT INTO pending_chunks(pending_id,chunk_index,chunk_path,uploaded,message_id,file_telegram_id) VALUES(1,0,'\(chunk.path)',\(uploaded ? 1 : 0),'1','file-1');
-            """
-            XCTAssertEqual(sqlite3_exec(connection, sql, nil, nil, nil), SQLITE_OK); sqlite3_close(connection)
-            let vault = try Vault(directory: location, password: password, transport: fake)
-            let result = try await vault.resume(); XCTAssertNil(result.warning)
-            let files = try await vault.files(); XCTAssertEqual(files.first?.storedSize, Int64(payload.count))
-            let db = try Database(directory: location)
-            XCTAssertEqual(number(try db.rows("SELECT size FROM chunks").first?["size"]), Int64(payload.count + Crypto.headerSize))
-            _ = try await vault.rebuildIndex()
-            let output = location.appendingPathComponent("output")
-            try await vault.download(try XCTUnwrap(files.first).id, to: output)
-            XCTAssertEqual(try Data(contentsOf: output), Data("legacy bytes".utf8))
-            let count = fake.counter; _ = try await vault.resume(); XCTAssertEqual(fake.counter, count)
-        }
+    func testPendingWithoutKeyIDFailsClosedWithoutDiscardingStaging() async throws {
+        let fake = FakeTelegram()
+        let vault = try Vault(directory: directory, password: password, transport: fake)
+        fake.failSend = true
+        do { _ = try await vault.upload(source("pending bytes"), name: "pending.txt"); XCTFail("expected staged upload") } catch {}
+        let db = try Database(directory: directory)
+        let pending = try XCTUnwrap(db.rows("SELECT id,key_id,temp_dir FROM pending_uploads").first)
+        let staging = string(pending["temp_dir"])
+        XCTAssertFalse(string(pending["key_id"]).isEmpty)
+        try db.run("UPDATE pending_uploads SET key_id=NULL WHERE id=?", [pending["id"]])
+        fake.failSend = false
+        let result = try await vault.resume()
+        XCTAssertNotNil(result.warning)
+        XCTAssertEqual(fake.counter, 0)
+        XCTAssertEqual(try db.rows("SELECT id FROM pending_uploads").count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging))
+        do { _ = try await vault.rebuildIndex(); XCTFail("pending state must block rebuild") } catch {}
     }
     func testBackupRejectsMalformedLocalSnapshotWithoutMovingPointer() async throws {
         let fake = FakeTelegram(), vault = try Vault(directory: directory, password: password, transport: FakeTelegram())
@@ -391,7 +370,7 @@ final class VersionHistoryTests: XCTestCase {
             let config = try Configuration(directory: location.appendingPathComponent("vault"), password: password)
             let pointer = try XCTUnwrap(config.raw["remoteManifest"] as? JSON)
             let bytes = try Data(contentsOf: transport.root.appendingPathComponent(string(pointer["fileId"])))
-            let snapshot = try jsonObject(Gzip.decompress(Crypto.decrypt(bytes, password: password)))
+            let snapshot = try jsonObject(Gzip.decompress(Crypto.decrypt(bytes, password: config.encryptionPassword)))
             let logical = try XCTUnwrap((snapshot["logicalFiles"] as? [JSON])?.first)
             let versions = try XCTUnwrap(snapshot["versions"] as? [JSON])
             XCTAssertEqual(local.first?.versionCount, versions.count)

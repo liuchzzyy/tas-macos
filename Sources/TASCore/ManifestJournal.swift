@@ -30,6 +30,7 @@ enum ManifestJournal {
             return
         }
         guard let snapshot = record["snapshot"] as? JSON else { throw TASError("索引发布日志缺少快照") }
+        try require((snapshot["files"] as? [JSON] ?? []).allSatisfy { config.generations[string($0["key_id"])] != nil }, "索引发布日志包含未知密钥编号")
         if string(record["phase"]) != "committed" {
             let tables = try Database.validatedManifest(snapshot)
             try db.transaction {

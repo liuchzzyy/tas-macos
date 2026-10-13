@@ -2,21 +2,19 @@
 
 用 **Swift + SwiftUI** 重写的 TAS（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套文件处理代码；运行和构建均不需要 npm、Node.js、Electron、WebView 或 Rust。
 
-当前发布 v1.2.2 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
+当前发布 v1.3.3 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
 
-## GUI 1.2.2（CLI 保持 1.2.0）
+## GUI 1.3.3（CLI 1.3.1）
 
-- GUI 版本为 **1.2.2（build 10）**，内置 CLI 保持 **1.2.0**。Release 标签代表 GUI 版本，不再被误当成 CLI 最新版本。
-- “文件同步”页面分为“文件同步”和“文件夹同步”：文件可通过拖放或上传按钮选择；文件夹保留拖放上传，移除重复的一次性文件夹上传按钮。移除指定文件新版本入口，同名文件仍可确认保存为新版本。
+- GUI 版本为 **1.3.3（build 12）**，内置 CLI 为 **1.3.1**。Release 标签代表 GUI 版本，不再被误当成 CLI 最新版本。
+- “文件同步”页面将文件与文件夹的一次性上传合并为同一个按钮和拖放区；持续同步仍需单独添加目录。同名文件仍可确认保存为新版本。
 - 文件夹拖放用于一次性递归上传，保留顶层目录；持续同步仍须明确添加同步目录，不会因拖放自动启用。
 - 支持简体中文／English 与亮色／暗色／跟随系统，选择会保存；主机器人显示“主机器人（primary）”，存储标识不变。
 - GUI 1.2.0 的旧更新器假定 GUI/CLI 同版本，因此首次升级至分离版本需手动安装 DMG；1.2.1 起按签名应用包的 `TASCLIVersion` 声明校验内置 CLI。
 
-**1.2.2 调整**：浅色背景采用更明亮的页面／卡片层级；语言菜单直接列出简体中文和 English；文件夹区域移除单独的一次性上传按钮，仍可拖放上传；版本管理联网检查时从 GitHub Release 对应标签的 `Resources/Info.plist` 读取 `TASCLIVersion`，失败则显示“暂未获取”，不将 GUI 标签冒充为 CLI 版本。
-
 ## 获取与运行
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.2) 下载 [TAS-1.2.2-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.2/TAS-1.2.2-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.2/TAS-1.2.2-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.3.3) 下载 [TAS-1.3.3-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.3.3/TAS-1.3.3-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.3.3/TAS-1.3.3-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
 
 打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 
@@ -88,7 +86,10 @@ CLI 测试使用隔离目录和本机 HTTP fixture，不访问真实 Telegram �
 ## 功能
 
 - 中英文 SwiftUI 文件库：可展开的文件夹层级、完整路径搜索、标签、下载、删除和原生文件选择器。
-- 上传统一位于“文件同步”：文件多选可通过按钮或拖放；文件夹仅保留独立拖放区。拖入文件夹一次性上传时保留所选顶层目录与子目录，不自动添加持续同步；忽略目录内隐藏项，不保存空文件夹，不跟随符号链接。
+- 上传统一位于“文件同步”：可通过一个按钮或拖放区混选多个文件和文件夹。一次性文件夹上传保留顶层目录与子目录，不自动添加持续同步；忽略目录内隐藏项，不保存空文件夹，不跟随符号链接。“所有文件”和“已删除”支持多选后批量下载、删除或永久清除；永久清除逐个执行且不可撤销。
+
+- “文件（文件夹）上传”用于一次性上传，“文件夹同步”需单独添加目录并持续检查变化。
+- 设置中的“更改密码”验证当前登录密码、检查新密码强度，并更新本机登录凭据和加密密钥代际。**新上传使用新一代密钥；已有内容仍使用过去代密钥，不会重新加密**，仍可通过新登录密码访问。旧密码仍可解密旧版密文（包括此前导出的副本），因此更改密码不能撤销或销毁已泄露的旧版密文。
 - AES-256-GCM 加密、gzip 压缩、19 MiB 分块和流式文件处理。
 - 持久化上传队列，网络中断或退出后可继续上传，不依赖原文件仍然存在。
 - 下载完成后校验认证标签、原始大小和 SHA-256，再原子替换目标文件。

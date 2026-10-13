@@ -33,19 +33,21 @@ public actor Vault {
     private var busy = false
     private let publicationBoundary: (String) throws -> Void
     public init(directory: URL = Paths.dataDirectory, password: String) throws {
-        self.directory = directory; self.password = password
+        self.directory = directory
         lock = try VaultLock(directory: directory)
         let loaded = try Configuration(directory: directory, password: password)
+        self.password = loaded.encryptionPassword
         config = loaded
-        db = try Database(directory: directory, recover: { try ManifestJournal.recover(db: $0, config: loaded, password: password) })
+        db = try Database(directory: directory, recover: { try ManifestJournal.recover(db: $0, config: loaded, password: loaded.encryptionPassword) })
         transport = Telegram(); publicationBoundary = { _ in }
     }
     init(directory: URL, password: String, transport: TelegramTransport, queryObserver: ((String) -> Void)? = nil, publicationBoundary: @escaping (String) throws -> Void = { _ in }) throws {
-        self.directory = directory; self.password = password
+        self.directory = directory
         lock = try VaultLock(directory: directory)
         let loaded = try Configuration(directory: directory, password: password)
+        self.password = loaded.encryptionPassword
         config = loaded
-        db = try Database(directory: directory, queryObserver: queryObserver) { try ManifestJournal.recover(db: $0, config: loaded, password: password, boundary: publicationBoundary) }
+        db = try Database(directory: directory, queryObserver: queryObserver) { try ManifestJournal.recover(db: $0, config: loaded, password: loaded.encryptionPassword, boundary: publicationBoundary) }
         self.transport = transport; self.publicationBoundary = publicationBoundary
     }
     public static func create(directory: URL = Paths.dataDirectory, password: String, token: String, chatID: String, endpoint: String? = nil) async throws {
@@ -60,6 +62,10 @@ public actor Vault {
         try require(!busy, "已有任务运行，请等待完成或取消当前任务")
         try ManifestJournal.recover(db: db, config: config, password: password)
         busy = true
+    }
+    public func changePassword(old: String, new: String, confirmation: String) throws {
+        try begin(); defer { busy = false }
+        try config.changePassword(old: old, new: new, confirmation: confirmation)
     }
     public func files(search: String = "", tag: String? = nil, includeDeleted: Bool = false) throws -> [StoredFile] { try db.files(search: search, tag: tag, includeDeleted: includeDeleted) }
     public func history(_ id: Int64) throws -> [FileVersion] { _ = try file(id); return try db.history(id) }
@@ -99,7 +105,8 @@ public actor Vault {
         defer { if !persisted { try? FileManager.default.removeItem(at: stage) } }
         let encrypted = stage.appendingPathComponent("encrypted")
         progress(TransferProgress("加密文件 · \(filename)"))
-        try Crypto.encryptFile(source, to: encrypted, password: password, compressed: compressed)
+        let generation = config.generationID
+        try Crypto.encryptFile(source, to: encrypted, password: config.objectKey(generation), compressed: compressed)
         try require(try Crypto.hashFile(source) == hash, "加密期间源文件发生变化，请重新上传")
         let input = try FileHandle(forReadingFrom: encrypted); defer { try? input.close() }
         let storedSize = try input.seekToEnd(); try input.seek(toOffset: 0)
@@ -116,7 +123,7 @@ public actor Vault {
         }
         try input.close(); try FileManager.default.removeItem(at: encrypted)
         let id = try db.transaction {
-            let id = try db.run("INSERT INTO pending_uploads(filename,file_path,hash,original_size,stored_size,compressed,total_chunks,temp_dir,message,source) VALUES(?,?,?,?,?,?,?,?,?,?)", [filename, source.path, hash, properties.fileSize ?? 0, Int64(storedSize), compressed ? 1 : 0, total, stage.path, message, sourceKind])
+            let id = try db.run("INSERT INTO pending_uploads(filename,file_path,hash,original_size,stored_size,compressed,total_chunks,temp_dir,message,source,key_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)", [filename, source.path, hash, properties.fileSize ?? 0, Int64(storedSize), compressed ? 1 : 0, total, stage.path, message, sourceKind, generation])
             for (index, chunk) in chunks.enumerated() { try db.run("INSERT INTO pending_chunks(pending_id,chunk_index,chunk_path,size) VALUES(?,?,?,?)", [id, index, chunk.0.path, chunk.1]) }
             return id
         }
@@ -124,6 +131,7 @@ public actor Vault {
     }
     private func finishUpload(_ id: Int64, progress: ProgressHandler) async throws {
         guard var upload = try db.rows("SELECT * FROM pending_uploads WHERE id=?", [id]).first else { throw TASError("未完成上传不存在") }
+        _ = try config.objectKey(string(upload["key_id"]))
         // -1 is written only when migrating a schema with no compression column.
         var compression: Bool? = number(upload["compressed"]) == -1 ? nil : number(upload["compressed"]) != 0
         let chunks = try db.rows("SELECT * FROM pending_chunks WHERE pending_id=? ORDER BY chunk_index", [id])
@@ -178,7 +186,7 @@ public actor Vault {
         try db.transaction {
             let previous = try db.rows("SELECT id FROM logical_files WHERE filename=?", [upload["filename"]]).first
             let stored = try checkedByteTotal(completed.map { number($0["size"]) - Int64(Crypto.headerSize) })
-            let fileID = try db.run("INSERT INTO files(filename,hash,original_size,stored_size,chunks,compressed) VALUES(?,?,?,?,?,?)", [upload["filename"], upload["hash"], upload["original_size"], stored, total, upload["compressed"]])
+            let fileID = try db.run("INSERT INTO files(filename,hash,original_size,stored_size,chunks,compressed,key_id) VALUES(?,?,?,?,?,?,?)", [upload["filename"], upload["hash"], upload["original_size"], stored, total, upload["compressed"], upload["key_id"]])
             for chunk in completed { try db.run("INSERT INTO chunks(file_id,chunk_index,message_id,file_telegram_id,bot_id,size) VALUES(?,?,?,?,?,?)", [fileID, chunk["chunk_index"], chunk["message_id"], chunk["file_telegram_id"], chunk["bot_id"], chunk["size"]]) }
             let logicalID: Int64
             if let previous { logicalID = number(previous["id"]) }
@@ -248,7 +256,7 @@ public actor Vault {
         try output.synchronize(); try output.close()
         progress(TransferProgress("解密并校验 · \(file.filename)"))
         let decrypted = working.appendingPathComponent("decrypted")
-        try Crypto.decryptFile(encrypted, to: decrypted, password: password)
+        try Crypto.decryptFile(encrypted, to: decrypted, password: config.objectKey(file.keyID))
         try Paths.privateDirectory(destination.deletingLastPathComponent())
         let final = try Paths.temporary(in: destination.deletingLastPathComponent())
         defer { try? FileManager.default.removeItem(at: final) }
@@ -330,7 +338,7 @@ public actor Vault {
         try require(encryptedSize <= Crypto.chunkSize, "远端索引超过大小限制")
         let manifest = try jsonObject(Gzip.decompress(Crypto.decrypt(Data(contentsOf: path), password: password)))
         let backup = directory.appendingPathComponent("index-before-rebuild-\(UUID().uuidString).db")
-        try db.backup(to: backup); try db.importManifest(manifest)
+        try db.backup(to: backup); try db.importManifest(manifest, keyIDs: Set(config.generations.keys))
         return OperationResult("索引恢复完成，原索引已备份为 \(backup.lastPathComponent)")
     }
     public func delete(_ id: Int64, hard: Bool = false) async throws -> OperationResult {

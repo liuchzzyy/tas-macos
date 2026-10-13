@@ -164,13 +164,13 @@ import TASCore
         guard canOperate, historyFile == nil else { return }
         presentingDialog = true
         let panel = NSOpenPanel(); panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false; panel.canChooseFiles = true
-        panel.prompt = L10n.tr("选择文件")
-        panel.message = L10n.tr("选择要上传的文件。")
+        panel.canChooseDirectories = true; panel.canChooseFiles = true
+        panel.prompt = L10n.tr("选择上传内容")
+        panel.message = L10n.tr("选择要一次性上传的文件或文件夹；文件夹不会加入持续同步。")
         let response = panel.runModal()
         presentingDialog = false
         if response == .OK {
-            do { try UploadKind.files.validate(panel.urls); upload(panel.urls) }
+            do { try UploadKind.filesAndFolders.validate(panel.urls); upload(panel.urls) }
             catch { notice = error.localizedDescription }
         }
     }

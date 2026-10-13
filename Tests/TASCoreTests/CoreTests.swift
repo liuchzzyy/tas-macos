@@ -28,6 +28,7 @@ final class CoreTests: XCTestCase {
     private var directory: URL!
     private var fixture: JSON!
     private var password: String { string(fixture["password"]) }
+    private let vaultPassword = "Core-Tests2026!"
     override func setUpWithError() throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("tas-test-\(UUID().uuidString)")
         try Paths.privateDirectory(directory)
@@ -36,8 +37,7 @@ final class CoreTests: XCTestCase {
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: directory) }
     private func resource(_ name: String, _ ext: String) -> URL { Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Fixtures")! }
     private func seedConfig(in target: URL? = nil) throws {
-        // Real v1 config is inexpensive to prepare and exercises legacy token loading.
-        try Paths.atomicWrite(jsonData(["configVersion": 1, "passwordHash": fixture["hash"]!, "botToken": fixture["token"]!, "chatId": "-123456", "futureField": "preserve-me"]), to: (target ?? directory!).appendingPathComponent("config.json"))
+        try Configuration.create(directory: target ?? directory!, password: vaultPassword, token: "123:fixture", chatID: "-123456")
     }
     func testNewPasswordsRequireAllFourCharacterClasses() throws {
         for invalid in ["123456789012", "lowercase123!", "UPPERCASE123!", "MixedCaseOnly!", "MixedCase1234", "Aa1!short"] {
@@ -49,7 +49,7 @@ final class CoreTests: XCTestCase {
         try Configuration.create(directory: directory, password: valid, token: "123:token", chatID: "-1")
         XCTAssertNoThrow(try Configuration(directory: directory, password: valid))
     }
-    func testExistingNumericPasswordStillUnlocks() throws {
+    func testExistingNumericPasswordIsRejectedWithoutLegacyCompatibility() throws {
         let oldPassword = "12345678"
         try Paths.atomicWrite(jsonData([
             "configVersion": 1,
@@ -57,7 +57,7 @@ final class CoreTests: XCTestCase {
             "botToken": "123:token",
             "chatId": "-1"
         ]), to: directory.appendingPathComponent("config.json"))
-        XCTAssertNoThrow(try Configuration(directory: directory, password: oldPassword))
+        XCTAssertThrowsError(try Configuration(directory: directory, password: oldPassword))
         XCTAssertFalse(PasswordPolicy.isValid(oldPassword))
     }
     func testLatestReleaseParsingAndVersionComparison() throws {
@@ -212,7 +212,7 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(try db!.files(search: "%").count, 0)
     }
     func testUploadResumeAtomicDownloadManifestRollbackAndRecovery() async throws {
-        try seedConfig(); let fake = FakeTelegram(); let vault = try Vault(directory: directory, password: password, transport: fake)
+        try seedConfig(); let fake = FakeTelegram(); let vault = try Vault(directory: directory, password: vaultPassword, transport: fake)
         let source = directory.appendingPathComponent("input.txt"); let bytes = Data("你好，原生 TAS\n".utf8)
         try Paths.atomicWrite(bytes, to: source)
         fake.failSend = true
@@ -237,11 +237,11 @@ final class CoreTests: XCTestCase {
         let rebuilt = try await vault.files(); XCTAssertEqual(rebuilt.map(\.filename), ["nested/a.txt"])
         XCTAssertEqual(rebuilt[0].tags, ["test"])
         let config = try jsonObject(Data(contentsOf: directory.appendingPathComponent("config.json")))
-        XCTAssertEqual(config["futureField"] as? String, "preserve-me")
+        XCTAssertNotNil(config["wrappedKeyring"])
         let verified = try await vault.verify(deep: true); XCTAssertNil(verified.warning)
     }
     func testBotOwnershipAndLastEnabledProtection() async throws {
-        try seedConfig(); let fake = FakeTelegram(); let vault = try Vault(directory: directory, password: password, transport: fake)
+        try seedConfig(); let fake = FakeTelegram(); let vault = try Vault(directory: directory, password: vaultPassword, transport: fake)
         try await vault.addBot(id: "second", token: "987:fixture", chatID: "-2")
         try await vault.updateBot("primary", enabled: false)
         do { try await vault.updateBot("second", enabled: false); XCTFail("must keep one enabled") } catch {}
@@ -252,13 +252,13 @@ final class CoreTests: XCTestCase {
         try await vault.download(files[0].id, to: directory.appendingPathComponent("restored"))
         XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("restored"), encoding: .utf8), "bot-owned")
         let config = try jsonObject(Data(contentsOf: directory.appendingPathComponent("config.json")))
-        XCTAssertNil(config["botToken"]); XCTAssertEqual(number(config["configVersion"]), 3)
-        XCTAssertEqual(config["futureField"] as? String, "preserve-me")
+        XCTAssertNil(config["botToken"]); XCTAssertEqual(number(config["configVersion"]), 5)
+        XCTAssertNotNil(config["wrappedKeyring"])
     }
     func testSyncUsesLegacyRelativePathsAndSourceModificationTimes() async throws {
         let library = directory.appendingPathComponent("library")
         try seedConfig(in: library); let fake = FakeTelegram()
-        let vault = try Vault(directory: library, password: password, transport: fake)
+        let vault = try Vault(directory: library, password: vaultPassword, transport: fake)
         let folder = directory! // This parent contains the vault; its internal files must be excluded.
         do { try await vault.addFolder(library); XCTFail("must exclude vault roots") } catch {}
         let source = folder.appendingPathComponent("note.txt")

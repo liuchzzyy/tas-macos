@@ -26,7 +26,7 @@ extension Database {
                 }
             }
         }
-        try require(schema == 1 || schema == 2, "不支持的恢复索引版本")
+        try require(schema == 3, "不支持的恢复索引版本")
         guard let objects = manifest["files"] as? [JSON], let chunks = manifest["chunks"] as? [JSON] else { throw TASError("恢复索引格式错误") }
         func identifiers(_ records: [JSON]) throws -> Set<Int64> {
             let ids = Set(records.map { number($0["id"]) })
@@ -39,6 +39,7 @@ extension Database {
         _ = try identifiers(chunks)
         let groupedChunks = Dictionary(grouping: chunks) { number($0["file_id"]) }
         for object in objects {
+            try require(!string(object["key_id"]).isEmpty, "恢复索引缺少文件密钥编号")
             let filename = string(object["filename"])
             try require(try Paths.logical(filename) == filename, "恢复索引路径无效")
             let hash = string(object["hash"])
@@ -58,7 +59,7 @@ extension Database {
         }
         try require(chunks.allSatisfy { objectIDs.contains(number($0["file_id"])) }, "恢复索引包含无主分块")
         let logical: [JSON], versions: [JSON]
-        if schema == 2 {
+        if schema == 3 {
             guard let l = manifest["logicalFiles"] as? [JSON], let v = manifest["versions"] as? [JSON] else { throw TASError("恢复索引缺少历史") }
             logical = l; versions = v
         } else {
@@ -109,9 +110,12 @@ extension Database {
         })
         return [("files", objects), ("chunks", chunks), ("logical_files", logical), ("file_versions", versions), ("tags", tags), ("shares", shares)]
     }
-    func importManifest(_ manifest: JSON) throws {
+    func importManifest(_ manifest: JSON, keyIDs: Set<String>? = nil) throws {
         try require(try rows("SELECT id FROM pending_uploads").isEmpty, "存在待上传任务，不能重建索引")
         let tables = try Self.validatedManifest(manifest)
+        if let keyIDs {
+            try require((manifest["files"] as? [JSON] ?? []).allSatisfy { keyIDs.contains(string($0["key_id"])) }, "恢复索引包含未知密钥编号")
+        }
         try transaction {
             try replaceManifestTables(tables, clearSyncState: true)
         }

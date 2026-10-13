@@ -12,8 +12,13 @@ struct LibraryView: View {
     @State private var tagging: StoredFile?
     @State private var tag = ""
     @State private var removeTag = false
+    @State private var selectedIDs: Set<String> = []
     var filtered: [StoredFile] { model.files.filter { $0.deleted == showDeleted && (search.isEmpty || $0.filename.localizedCaseInsensitiveContains(search) || $0.tags.contains(where: { $0.localizedCaseInsensitiveContains(search) })) } }
-    var selection: StoredFile? { filtered.first { $0.id == model.selectedFileID } }
+    var selection: StoredFile? {
+        guard selectedIDs.count == 1, let id = selectedIDs.first else { return nil }
+        return filtered.first { "file:\($0.id)" == id }
+    }
+    var selectedFiles: [StoredFile] { filtered.filter { selectedIDs.contains("file:\($0.id)") } }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
@@ -42,7 +47,18 @@ struct LibraryView: View {
                         TextField(L10n.tr("搜索文件名或标签"), text: $search)
                             .textFieldStyle(.roundedBorder).frame(width: 225)
                     }
-                    if let selection {
+                    if selectedFiles.count > 1 {
+                        HStack(spacing: 9) {
+                            Text(L10n.tr("已选择 %@ 个文件", String(describing: selectedFiles.count)))
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            Spacer(minLength: 12)
+                            Button { model.downloadFiles(selectedFiles) } label: { Label(L10n.tr("下载所选…"), systemImage: "arrow.down.to.line") }
+                            Button(role: .destructive) { model.deleteFiles(selectedFiles, permanently: showDeleted) } label: {
+                                Label(showDeleted ? L10n.tr("永久清除所选…") : L10n.tr("删除所选并保留历史…"), systemImage: "trash")
+                            }
+                        }.disabled(!model.canOperate || model.historyFile != nil)
+                        Divider()
+                    } else if let selection {
                         HStack(spacing: 9) {
                             Text(selection.filename).font(LibraryStyle.helper).foregroundStyle(.secondary)
                                 .lineLimit(1).truncationMode(.middle).help(selection.filename)
@@ -81,7 +97,9 @@ struct LibraryView: View {
                                 .font(LibraryStyle.body).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 40)
                     } else {
-                        FileHierarchyView(files: filtered, search: search) { file in
+                        FileHierarchyView(files: filtered, search: search, selectedIDs: $selectedIDs,
+                                          batchDownload: { model.downloadFiles($0) },
+                                          batchDelete: { model.deleteFiles($0, permanently: showDeleted) }) { file in
                             tagging = file; model.presentingDialog = true
                         }
                     }
@@ -89,8 +107,11 @@ struct LibraryView: View {
             }
         }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .tasCanvas()
-        .onChange(of: filtered.map(\.id)) { _, ids in if let id = model.selectedFileID, !ids.contains(id) { model.selectedFileID = nil } }
-        .onDisappear { model.selectedFileID = nil }
+        .onChange(of: filtered.map(\.id)) { _, ids in
+            selectedIDs = selectedIDs.intersection(Set(ids.map { "file:\($0)" }))
+            if let id = model.selectedFileID, !ids.contains(id) { model.selectedFileID = nil }
+        }
+        .onDisappear { selectedIDs = []; model.selectedFileID = nil }
         .sheet(item: $tagging, onDismiss: { model.presentingDialog = false }) { target in
             VStack(alignment: .leading, spacing: 18) {
                 Text(L10n.tr("编辑标签")).font(.title2.bold())
@@ -102,5 +123,66 @@ struct LibraryView: View {
         }
     }
 
+}
+
+@MainActor extension AppModel {
+    func downloadFiles(_ selected: [StoredFile]) {
+        guard canOperate, historyFile == nil, selected.count > 1 else { return }
+        let ids = Set(selected.map(\.id))
+        let targets = files.filter { ids.contains($0.id) && $0.deleted == selected[0].deleted }
+        guard targets.count == ids.count else { return }
+        presentingDialog = true
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+        panel.prompt = L10n.tr("选择下载目录")
+        let response = panel.runModal()
+        presentingDialog = false
+        guard response == .OK, let root = panel.url else { return }
+        let destinations = LibrarySelection.downloadNames(targets).map { root.appendingPathComponent($0) }
+        guard destinations.allSatisfy({ !FileManager.default.fileExists(atPath: $0.path) }) else {
+            notice = L10n.tr("下载目录中已有同名文件；未开始下载。请另选目录。")
+            return
+        }
+        run(L10n.tr("下载所选文件")) { vault, progress in
+            for (index, target) in targets.enumerated() {
+                try Task.checkCancellation()
+                progress(TransferProgress(L10n.tr("下载 %@/%@ · %@", String(describing: index + 1), String(describing: targets.count), String(describing: target.filename))))
+                try await vault.download(target.id, to: destinations[index], progress: progress)
+            }
+            return OperationResult(L10n.tr("已下载 %@ 个文件", String(describing: targets.count)))
+        }
+    }
+
+    func deleteFiles(_ selected: [StoredFile], permanently: Bool) {
+        guard canOperate, historyFile == nil, selected.count > 1 else { return }
+        let ids = Set(selected.map(\.id))
+        let targets = files.filter { ids.contains($0.id) && $0.deleted == permanently }
+        guard targets.count == ids.count else { return }
+        presentingDialog = true
+        let alert = NSAlert()
+        alert.alertStyle = permanently ? .critical : .warning
+        alert.messageText = permanently
+            ? L10n.tr("永久清除 %@ 个文件及全部历史？", String(describing: targets.count))
+            : L10n.tr("删除 %@ 个文件并保留历史？", String(describing: targets.count))
+        alert.informativeText = permanently
+            ? L10n.tr("无法撤销。将逐个清除文件、全部版本记录及不再被引用的远端分块；已清除的文件无法恢复。")
+            : L10n.tr("文件将移到“已删除”，全部版本仍会保留；不会删除本地源文件。")
+        alert.addButton(withTitle: permanently ? L10n.tr("永久清除所选") : L10n.tr("删除所选"))
+        alert.addButton(withTitle: L10n.tr("取消"))
+        let response = alert.runModal()
+        presentingDialog = false
+        guard response == .alertFirstButtonReturn else { return }
+        run(permanently ? L10n.tr("永久清除所选") : L10n.tr("删除所选文件")) { vault, progress in
+            var warnings: [String] = []
+            for (index, target) in targets.enumerated() {
+                try Task.checkCancellation()
+                progress(TransferProgress(L10n.tr("处理 %@/%@ · %@", String(describing: index + 1), String(describing: targets.count), String(describing: target.filename))))
+                let result = try await vault.delete(target.id, hard: permanently)
+                if let warning = result.warning { warnings.append(warning) }
+            }
+            return OperationResult(L10n.tr("已处理 %@ 个文件", String(describing: targets.count)),
+                                   warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))
+        }
+    }
 }
 #endif

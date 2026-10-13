@@ -3,6 +3,20 @@ import TASCore
 @testable import TASApp
 
 final class UploadInputTests: XCTestCase {
+    func testUnifiedDropAcceptsFilesAndFoldersTogetherButRejectsLinks() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let folder = root.appendingPathComponent("photos")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("note.txt")
+        try Data("note".utf8).write(to: file)
+        let link = root.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: folder)
+        XCTAssertNoThrow(try UploadKind.filesAndFolders.validate([file, folder]))
+        XCTAssertThrowsError(try UploadKind.filesAndFolders.validate([file, link]))
+        XCTAssertThrowsError(try UploadKind.filesAndFolders.validate([URL(string: "https://example.com")!]))
+    }
+
     func testTypedDropRejectsWholeMixedBatchAndPreservesFolderHierarchy() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let folder = root.appendingPathComponent("报告")

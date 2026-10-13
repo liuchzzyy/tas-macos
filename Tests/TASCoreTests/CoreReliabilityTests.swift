@@ -51,7 +51,7 @@ final class CoreReliabilityTests: XCTestCase {
         let config = try Configuration(directory: directory, password: password)
         guard let pointer = config.raw["remoteManifest"] as? JSON else { return [] }
         let bytes = try XCTUnwrap(transport.storage.documents[string(pointer["fileId"])])
-        let snapshot = try jsonObject(Gzip.decompress(Crypto.decrypt(bytes, password: password)))
+        let snapshot = try jsonObject(Gzip.decompress(Crypto.decrypt(bytes, password: config.encryptionPassword)))
         _ = try Database.validatedManifest(snapshot)
         return (snapshot["logicalFiles"] as? [JSON] ?? []).map { string($0["filename"]) }.sorted()
     }

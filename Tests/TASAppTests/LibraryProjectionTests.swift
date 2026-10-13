@@ -33,4 +33,25 @@ final class LibraryProjectionTests: XCTestCase {
         XCTAssertTrue(cache.rows.isEmpty)
         XCTAssertTrue(cache.folderPaths.isEmpty)
     }
+    func testMultiSelectionKeepsOnlyVisibleFileIDsAndNeverFolders() {
+        let files = [file(1, "a/one.txt"), file(2, "a/two.txt"), file(3, "top.txt")]
+        var cache = LibraryProjection()
+        cache.update(files: files, expanded: ["a"], expandAll: false)
+        let selection = LibrarySelection.resolve(["folder:a", "file:1", "file:2", "file:999"], rows: cache.rows)
+        XCTAssertEqual(selection.map(\.id), [1, 2])
+        cache.update(files: files, expanded: [], expandAll: false)
+        XCTAssertTrue(LibrarySelection.resolve(["file:1", "file:2"], rows: cache.rows).isEmpty)
+        cache.update(files: [file(2, "a/two.txt")], expanded: [], expandAll: true)
+        XCTAssertEqual(LibrarySelection.resolve(["file:1", "file:2"], rows: cache.rows).map(\.id), [2])
+    }
+    func testBatchDownloadNamesDisambiguateSameLeafAndPreserveIDs() {
+        let files = [file(1, "a/report.txt"), file(2, "b/report.txt")]
+        XCTAssertEqual(LibrarySelection.downloadNames(files), ["report-1.txt", "report-2.txt"])
+    }
+    func testBatchDownloadNamesAvoidCollisionWithAlreadyNamedFile() {
+        let files = [file(1, "a/report.txt"), file(2, "b/report.txt"), file(3, "report-1.txt")]
+        let names = LibrarySelection.downloadNames(files)
+        XCTAssertEqual(Set(names).count, files.count)
+        XCTAssertTrue(names.contains("report-1.txt"))
+    }
 }

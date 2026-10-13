@@ -1,4 +1,5 @@
 #if os(macOS)
+import Foundation
 import TASCore
 
 /// Structure is invalidated only by record changes, never by selection,
@@ -25,6 +26,33 @@ struct LibraryProjection {
         self.expanded = expanded
         self.expandAll = expandAll
         rows = LibraryTree.visibleRows(roots, expanded: expanded, expandAll: expandAll)
+    }
+}
+
+/// Selection is keyed by persistent file IDs; folder rows never become batch targets.
+enum LibrarySelection {
+    static func resolve(_ ids: Set<String>, rows: [LibraryRow]) -> [StoredFile] {
+        rows.compactMap { ids.contains($0.id) ? $0.node.file : nil }
+    }
+
+    static func downloadNames(_ files: [StoredFile]) -> [String] {
+        let leaves = files.map { URL(fileURLWithPath: $0.filename).lastPathComponent }
+        let duplicates = Dictionary(grouping: leaves, by: { $0.lowercased() })
+        var reserved = Set(leaves.map { $0.lowercased() })
+        return zip(files, leaves).map { file, leaf in
+            guard duplicates[leaf.lowercased(), default: []].count > 1 else { return leaf }
+            let name = NSString(string: leaf)
+            let ext = name.pathExtension
+            let suffix = ext.isEmpty ? "" : ".\(ext)"
+            var candidate = "\(name.deletingPathExtension)-\(file.id)\(suffix)"
+            var index = 2
+            while reserved.contains(candidate.lowercased()) {
+                candidate = "\(name.deletingPathExtension)-\(file.id)-\(index)\(suffix)"
+                index += 1
+            }
+            reserved.insert(candidate.lowercased())
+            return candidate
+        }
     }
 }
 #endif
