@@ -17,6 +17,7 @@ enum AppCloseBehavior: String, CaseIterable { case quit, menuBar }
     static let silentLaunchKey = "TAS.silentLaunch"
     static let launchAtLoginKey = "TAS.launchAtLogin"
     static let closeBehaviorKey = "TAS.closeBehavior"
+    static let autoCheckUpdatesKey = "TAS.autoCheckUpdates"
     private let defaults: UserDefaults
     @Published var language: AppLanguage { didSet { defaults.set(language.rawValue, forKey: Self.languageKey) } }
     @Published var appearance: AppAppearance { didSet { defaults.set(appearance.rawValue, forKey: Self.appearanceKey) } }
@@ -25,6 +26,8 @@ enum AppCloseBehavior: String, CaseIterable { case quit, menuBar }
     @Published var closeBehavior: AppCloseBehavior { didSet { defaults.set(closeBehavior.rawValue, forKey: Self.closeBehaviorKey) } }
     /// Off by default: storing the vault password in the keychain is opt-in.
     @Published var rememberPassword: Bool { didSet { defaults.set(rememberPassword, forKey: Self.rememberPasswordKey) } }
+    /// Off by default: automatic background release checks are opt-in.
+    @Published var autoCheckUpdates: Bool { didSet { defaults.set(autoCheckUpdates, forKey: Self.autoCheckUpdatesKey) } }
     init(defaults: UserDefaults = L10n.defaults) {
         self.defaults = defaults
         language = AppLanguage(rawValue: defaults.string(forKey: Self.languageKey) ?? "") ?? .chinese
@@ -33,6 +36,7 @@ enum AppCloseBehavior: String, CaseIterable { case quit, menuBar }
         launchAtLogin = defaults.bool(forKey: Self.launchAtLoginKey)
         closeBehavior = AppCloseBehavior(rawValue: defaults.string(forKey: Self.closeBehaviorKey) ?? "") ?? .quit
         rememberPassword = defaults.bool(forKey: Self.rememberPasswordKey)
+        autoCheckUpdates = defaults.bool(forKey: Self.autoCheckUpdatesKey)
     }
 }
 

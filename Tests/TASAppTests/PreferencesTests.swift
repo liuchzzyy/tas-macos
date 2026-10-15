@@ -31,6 +31,17 @@ final class PreferencesTests: XCTestCase {
         preferences.rememberPassword = false
         XCTAssertFalse(AppPreferences(defaults: defaults).rememberPassword)
     }
+    @MainActor func testAutoCheckUpdatesDefaultsOffAndPersists() {
+        let suite = "TASPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferences(defaults: defaults)
+        XCTAssertFalse(preferences.autoCheckUpdates)
+        preferences.autoCheckUpdates = true
+        XCTAssertTrue(AppPreferences(defaults: defaults).autoCheckUpdates)
+        preferences.autoCheckUpdates = false
+        XCTAssertFalse(AppPreferences(defaults: defaults).autoCheckUpdates)
+    }
     @MainActor func testStartupPreferencesPersistAndCloseDefaultsToQuit() {
         let suite = "TASPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -59,6 +70,11 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(L10n.tr("登录后启动", language: .english), "Launch at Login")
         XCTAssertEqual(L10n.tr("静默启动", language: .english), "Start Silently")
         XCTAssertEqual(L10n.tr("保留在菜单栏", language: .english), "Keep in Menu Bar")
+        XCTAssertEqual(L10n.tr("常规", language: .english), "General")
+        XCTAssertEqual(L10n.tr("维护", language: .english), "Maintenance")
+        XCTAssertEqual(L10n.tr("机器人", language: .english), "Bots")
+        XCTAssertEqual(L10n.tr("上传内容…", language: .english), "Upload Items…")
+        XCTAssertEqual(L10n.tr("打开 TAS 主窗口", language: .english), "Open TAS Main Window")
     }
     func testExplicitLocalizationPreservesInterpolatedUserContentAndBotIDs() {
         XCTAssertEqual(L10n.tr("文件同步", language: .english), "File Sync")

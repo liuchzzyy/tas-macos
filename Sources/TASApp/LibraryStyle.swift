@@ -6,10 +6,10 @@ enum LibraryStyle {
     static let canvas = TASDesign.canvas
     static let surface = TASDesign.surface
     static let hairline = TASDesign.border
-    static let pageTitle = Font.system(size: 26, weight: .bold)
-    static let sectionTitle = Font.system(size: 18, weight: .semibold)
-    static let body = Font.system(size: 14)
-    static let helper = Font.system(size: 13)
+    static let pageTitle = Font.system(size: 22, weight: .bold)
+    static let sectionTitle = Font.system(size: 15, weight: .semibold)
+    static let body = Font.system(size: 13)
+    static let helper = Font.system(size: 12)
 }
 
 struct LibrarySurface<Content: View>: View {

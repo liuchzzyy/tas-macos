@@ -38,7 +38,9 @@ struct UIPreviewOptions {
         do { options = try UIPreviewOptions(arguments: CommandLine.arguments) }
         catch { fputs("Invalid preview options: \(error)\n", stderr); exit(5) }
         let size = NSSize(width: options.width, height: options.height)
-        let root = RootView().environmentObject(AppModel())
+        let model = AppModel()
+        model.selectedSection = options.section
+        let root = RootView().environmentObject(model)
             .frame(width: size.width, height: size.height)
             .tint(TASDesign.accent)
         let host = NSHostingView(rootView: root)

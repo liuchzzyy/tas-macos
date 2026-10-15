@@ -49,33 +49,271 @@ import TASCore
         .defaultLaunchBehavior(StartupSettings.shouldStartHidden(arguments: CommandLine.arguments, preferences: preferences) ? .suppressed : .presented)
         .windowToolbarStyle(.unified)
         .commands {
-            CommandGroup(replacing: .newItem) {}
-            CommandMenu(L10n.tr("文件库")) {
-                Button(L10n.tr("版本历史…")) { if let file = model.selection { model.showHistory(file) } }.keyboardShortcut("h", modifiers: [.command, .shift]).disabled(!model.canUseSelection)
-                Button(L10n.tr("恢复自动同步…")) { if let file = model.selection { model.resumeFileSync(file) } }.disabled(!model.canResumeSync)
-                Divider()
-                Button(L10n.tr("删除并保留历史…")) { if let file = model.selection { model.deleteFile(file) } }.disabled(!model.canUploadVersion)
-                Button(L10n.tr("永久清除…"), role: .destructive) { if let file = model.selection { model.deleteFile(file, permanently: true) } }.disabled(!model.canUseSelection || model.selection?.deleted != true)
-                Divider()
-                Button(L10n.tr("锁定文件库")) { model.lock() }.keyboardShortcut("l", modifiers: [.command, .shift]).disabled(!model.canOperate || model.historyFile != nil)
-                Button(L10n.tr("备份索引")) { model.run(L10n.tr("备份索引")) { vault, _ in try await vault.backupIndex() } }.disabled(!model.canOperate || model.historyFile != nil)
-            }
+            AppCommands(model: model)
         }
-        MenuBarExtra("TAS", systemImage: "shippingbox.fill") {
-            MenuBarActions()
-        }.menuBarExtraStyle(.menu)
+
+        Settings {
+            SettingsView()
+                .environmentObject(model)
+                .tint(TASDesign.accent)
+                .preferredColorScheme(preferences.appearance.colorScheme)
+                .environment(\.locale, Locale(identifier: preferences.language.rawValue))
+        }
+
+        MenuBarExtra {
+            MenuBarActions(model: model)
+        } label: {
+            MenuBarStatusLabel(model: model)
+        }
+        .menuBarExtraStyle(.menu)
+    }
+}
+
+struct MenuBarStatusLabel: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        let icon: String = {
+            if model.busy { return "arrow.triangle.2.circlepath" }
+            if model.vault == nil { return "lock" }
+            return "shippingbox.fill"
+        }()
+        Image(systemName: icon)
     }
 }
 
 struct MenuBarActions: View {
+    @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+
     var body: some View {
-        Button(L10n.tr("打开 TAS")) {
+        if model.vault != nil {
+            Text(L10n.tr("文件库已解锁"))
+            Text(L10n.tr("%@ 个文件 · %@", String(model.activeFiles.count), bytes(model.statistics?.storedBytes ?? 0)))
+            if model.busy {
+                Divider()
+                Text(L10n.current(model.progress.message))
+            }
+        } else {
+            Text(L10n.tr("文件库未连接或已锁定"))
+        }
+
+        Divider()
+
+        Button(L10n.tr("打开 TAS 主窗口")) {
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
+
+        if model.vault != nil {
+            Divider()
+
+            Button(L10n.tr("立即同步")) {
+                model.run(L10n.tr("同步")) { vault, progress in
+                    try await vault.sync(progress: progress)
+                }
+            }
+            .disabled(!model.canOperate)
+
+            Button(L10n.tr("上传内容…")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.selectedSection = "sync"
+            }
+            .disabled(!model.canOperate)
+
+            Button(L10n.tr("备份索引")) {
+                model.run(L10n.tr("备份索引")) { vault, _ in
+                    try await vault.backupIndex()
+                }
+            }
+            .disabled(!model.canOperate || model.historyFile != nil)
+
+            Button(L10n.tr("锁定文件库")) {
+                model.lock()
+            }
+            .disabled(!model.canOperate || model.historyFile != nil)
+        }
+
         Divider()
-        Button(L10n.tr("退出 TAS")) { NSApp.terminate(nil) }
+
+        Button(L10n.tr("设置…")) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .keyboardShortcut(",", modifiers: .command)
+
+        Divider()
+
+        Button(L10n.tr("退出 TAS")) {
+            NSApp.terminate(nil)
+        }
+        .keyboardShortcut("q", modifiers: .command)
+    }
+}
+
+struct AppCommands: Commands {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button(L10n.tr("上传内容…")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.selectedSection = "sync"
+            }
+            .keyboardShortcut("u", modifiers: .command)
+            .disabled(!model.canOperate)
+
+            Button(L10n.tr("添加同步目录…")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.addFolder()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(!model.canOperate)
+
+            Divider()
+
+            Button(L10n.tr("立即同步")) {
+                model.run(L10n.tr("同步")) { vault, progress in
+                    try await vault.sync(progress: progress)
+                }
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(!model.canOperate)
+
+            Button(L10n.tr("备份索引")) {
+                model.run(L10n.tr("备份索引")) { vault, _ in
+                    try await vault.backupIndex()
+                }
+            }
+            .keyboardShortcut("b", modifiers: [.command, .shift])
+            .disabled(!model.canOperate || model.historyFile != nil)
+
+            Button(L10n.tr("恢复全部文件…")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.restoreAll()
+            }
+            .disabled(!model.canOperate || model.activeFiles.isEmpty)
+        }
+
+        CommandMenu(L10n.tr("显示")) {
+            Button(L10n.tr("概览")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.selectedSection = "overview"
+            }
+            .keyboardShortcut("1", modifiers: .command)
+
+            Button(L10n.tr("所有文件")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.selectedSection = "files"
+            }
+            .keyboardShortcut("2", modifiers: .command)
+
+            Button(L10n.tr("已删除")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.selectedSection = "deleted"
+            }
+            .keyboardShortcut("3", modifiers: .command)
+
+            Divider()
+
+            Button(L10n.tr("传输任务")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.selectedSection = "transfers"
+            }
+            .keyboardShortcut("4", modifiers: .command)
+
+            Button(L10n.tr("文件同步")) {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                model.selectedSection = "sync"
+            }
+            .keyboardShortcut("5", modifiers: .command)
+        }
+
+        CommandMenu(L10n.tr("文件库")) {
+            Button(L10n.tr("锁定文件库")) {
+                model.lock()
+            }
+            .keyboardShortcut("l", modifiers: [.command, .shift])
+            .disabled(!model.canOperate || model.historyFile != nil)
+
+            Divider()
+
+            Button(L10n.tr("下载选中文件…")) {
+                if let file = model.selection {
+                    model.download(file)
+                }
+            }
+            .keyboardShortcut("d", modifiers: .command)
+            .disabled(!model.canUseSelection)
+
+            Button(L10n.tr("版本历史…")) {
+                if let file = model.selection {
+                    model.showHistory(file)
+                }
+            }
+            .keyboardShortcut("h", modifiers: [.command, .shift])
+            .disabled(!model.canUseSelection)
+
+            Button(L10n.tr("恢复自动同步…")) {
+                if let file = model.selection {
+                    model.resumeFileSync(file)
+                }
+            }
+            .disabled(!model.canResumeSync)
+
+            Divider()
+
+            Button(L10n.tr("删除并保留历史…")) {
+                if let file = model.selection {
+                    model.deleteFile(file)
+                }
+            }
+            .disabled(!model.canUploadVersion)
+
+            Button(L10n.tr("永久清除…"), role: .destructive) {
+                if let file = model.selection {
+                    model.deleteFile(file, permanently: true)
+                }
+            }
+            .disabled(!model.canUseSelection || model.selection?.deleted != true)
+
+            Divider()
+
+            Button(L10n.tr("检查连接")) {
+                model.run(L10n.tr("检查连接")) { vault, _ in
+                    try await vault.checkBots()
+                }
+            }
+            .disabled(!model.canOperate)
+
+            Button(L10n.tr("完整校验")) {
+                model.run(L10n.tr("完整校验")) { vault, progress in
+                    try await vault.verify(deep: true, progress: progress)
+                }
+            }
+            .disabled(!model.canOperate)
+        }
+
+        CommandGroup(replacing: .help) {
+            Button(L10n.tr("TAS 帮助与文档")) {
+                if let url = URL(string: "https://github.com/liuchzzyy/tas-macos") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            Divider()
+            Button(L10n.tr("在访达中打开文件库目录")) {
+                NSWorkspace.shared.open(model.directory)
+            }
+        }
     }
 }
 

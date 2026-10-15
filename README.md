@@ -2,12 +2,19 @@
 
 用 **Swift + SwiftUI** 重写的 TAS（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套文件处理代码；运行和构建均不需要 npm、Node.js、Electron、WebView 或 Rust。
 
-当前发布 v1.3.6 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
+当前发布 v1.4.6 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
 
-## GUI 1.3.6（CLI 1.3.1）
+## GUI 1.4.6（CLI 1.4.1）
 
-- GUI 版本为 **1.3.6（build 15）**，内置 CLI 保持 **1.3.1**。Release 标签代表 GUI 版本，不再被误当成 CLI 最新版本。
-- 界面视觉优化：统一页面标题与分区标题的字号层级、卡片圆角和内边距；侧栏分区标签改为小号大写样式，侧栏底部状态卡与窗口状态栏更紧凑；解锁页尺寸收紧；拖放区与若干辅助说明文字精简（文件同步的自动检查选项、传输任务记录条数、设置中的关闭行为／密码／钥匙串／恢复提示、空状态文案）。仅调整排版与措辞，功能、操作流程与数据结构不变；页面标题下的说明文字、概览指标卡尺寸、上传区标题与按钮名称、侧栏品牌尺寸保持不变。
+- GUI 版本为 **1.4.6（build 16）**，内置 CLI 为 **1.4.1**。Release 标签代表 GUI 版本。
+- **macOS 原生设置体系（Settings · ⌘,）**：设置从应用主窗口完全剥离为标准 Mac Settings 场景，提供常规、文件库、机器人、更新、维护五个原生 Tab 分栏。
+- **软件更新管理纳入原生设置**：新增“自动检查最新版本”开关（默认关闭），开启后自启与后台自动检测并弹窗更新；设置中支持同步查看 GUI 与内置 CLI 的当前及最新版本。
+- **主界面与交互优化**：
+  - 左下角设置图标改为更新图标（`arrow.triangle.2.circlepath`），点击即时触发更新检查，有新版本弹窗确认安装，最新版本友好提示。
+  - 外观（浅色/深色/跟随系统）与语言快捷切换组件恢复至主窗口最左下角。
+  - 侧边栏移除“设置”与“版本管理”，聚焦核心文件管理与同步流程。
+  - “文件（文件夹）上传”拖放框深度重塑：扩充内部呼吸感与内边距，移除拥挤的“点击选择”文案，图标升级为清晰独立的上传气泡。
+  - 全局菜单栏深度适配（文件、显示 ⌘1~⌘5、文件库操作与访达集成），移除了冗余的菜单项。
 - 设置新增“启动与窗口”卡片：**开机自启**（登录项，经 `SMAppService` 注册签名登录助手，仅在 `/Applications` 下可用）、**静默启动**（仅登录自启时不显示窗口）、**关闭行为**（退出 TAS／保留在菜单栏）。默认均为关闭/退出，不改变原有习惯。选择保留在菜单栏时文件库保持解锁，可从菜单栏图标重新打开或退出。
 - 登录助手 `TASLoginHelper.app` 内嵌于 `Contents/Library/LoginItems`，不向用户目录写 LaunchAgent 或 plist；以私有参数 `--tas-login-launch` 打开主程序。
 - 可选择将登录密码保存在本机 Apple 登录钥匙串，后续启动自动解锁；默认关闭。更改密码后同步更新钥匙串，关闭选项或点“忘记保存的密码”会移除凭据。手动锁定不会立刻自动解锁。此功能并非独立备份，且不应在不受信任的 Mac 账户上启用。
@@ -20,7 +27,7 @@
 
 ## 获取与运行
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.3.6) 下载 [TAS-1.3.6-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.3.6/TAS-1.3.6-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.3.6/TAS-1.3.6-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.4.6) 下载 [TAS-1.4.6-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.4.6/TAS-1.4.6-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.4.6/TAS-1.4.6-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
 
 打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
 

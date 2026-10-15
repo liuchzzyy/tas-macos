@@ -4,20 +4,85 @@ import AppKit
 import UniformTypeIdentifiers
 import TASCore
 
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case general, vault, bots, updates, maintenance
+    var id: String { rawValue }
+}
+
 struct SettingsView: View {
     @ObservedObject private var preferences = AppPreferences.shared
     @EnvironmentObject private var model: AppModel
     @State private var addingBot = false
     @State private var editingBot: BotInfo?
     @State private var changingPassword = false
+    @State private var selectedTab: SettingsTab = .general
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.tr("设置")).font(LibraryStyle.pageTitle)
+                Text(L10n.tr("管理文件库、连接与恢复。"))
+                    .font(LibraryStyle.body).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+
+            TabView(selection: $selectedTab) {
+                GeneralSettingsTab()
+                    .tabItem {
+                        Label(L10n.tr("常规"), systemImage: "gearshape")
+                    }
+                    .tag(SettingsTab.general)
+
+                VaultSettingsTab(changingPassword: $changingPassword)
+                    .tabItem {
+                        Label(L10n.tr("文件库"), systemImage: "lock.shield")
+                    }
+                    .tag(SettingsTab.vault)
+
+                BotsSettingsTab(addingBot: $addingBot, editingBot: $editingBot)
+                    .tabItem {
+                        Label(L10n.tr("机器人"), systemImage: "paperplane")
+                    }
+                    .tag(SettingsTab.bots)
+
+                UpdatesSettingsTab()
+                    .tabItem {
+                        Label(L10n.tr("更新"), systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .tag(SettingsTab.updates)
+
+                MaintenanceSettingsTab()
+                    .tabItem {
+                        Label(L10n.tr("维护"), systemImage: "wrench.and.screwdriver")
+                    }
+                    .tag(SettingsTab.maintenance)
+            }
+        }
+        .frame(width: 560, height: 480)
+        .preferredColorScheme(preferences.appearance.colorScheme)
+        .environment(\.locale, Locale(identifier: preferences.language.rawValue))
+        .sheet(isPresented: $addingBot, onDismiss: { model.endSettingsDialog() }) { AddBotView() }
+        .sheet(item: $editingBot, onDismiss: { model.endSettingsDialog() }) { bot in EndpointView(bot: bot) }
+        .sheet(isPresented: $changingPassword, onDismiss: { model.endSettingsDialog() }) { ChangePasswordView() }
+    }
+}
+
+struct GeneralSettingsTab: View {
+    @ObservedObject private var preferences = AppPreferences.shared
+    @EnvironmentObject private var model: AppModel
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.tr("设置")).font(LibraryStyle.pageTitle)
-                    Text(L10n.tr("管理文件库、连接与恢复。"))
-                        .font(LibraryStyle.body).foregroundStyle(.secondary)
+                LibrarySurface(padding: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.tr("外观与语言")).font(LibraryStyle.sectionTitle)
+                        Divider()
+                        PreferencesControls()
+                    }
                 }
+
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(L10n.tr("启动与窗口")).font(LibraryStyle.sectionTitle)
@@ -55,6 +120,20 @@ struct SettingsView: View {
                             .font(LibraryStyle.helper).foregroundStyle(.secondary)
                     }
                 }
+            }
+            .padding(20)
+        }
+    }
+}
+
+struct VaultSettingsTab: View {
+    @ObservedObject private var preferences = AppPreferences.shared
+    @EnvironmentObject private var model: AppModel
+    @Binding var changingPassword: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(L10n.tr("文件库")).font(LibraryStyle.sectionTitle)
@@ -66,35 +145,66 @@ struct SettingsView: View {
                             Text(model.vault == nil ? L10n.tr("界面预览 · 未读取索引") : L10n.tr("最近索引备份：%@", String(describing: model.manifestDate ?? L10n.tr("尚未备份"))))
                                 .font(LibraryStyle.helper).foregroundStyle(.secondary)
                             Spacer()
-                            Button(L10n.tr("备份索引")) { model.run(L10n.tr("备份索引")) { vault, _ in try await vault.backupIndex() } }.disabled(!model.canOperate)
+                            Button(L10n.tr("在访达中显示")) {
+                                NSWorkspace.shared.open(model.directory)
+                            }
+                            Button(L10n.tr("备份索引")) {
+                                model.run(L10n.tr("备份索引")) { vault, _ in try await vault.backupIndex() }
+                            }.disabled(!model.canOperate)
                         }
                     }
                 }
+
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text(L10n.tr("登录密码")).font(LibraryStyle.sectionTitle)
                             Spacer()
-                            Button(L10n.tr("更改密码…")) { if model.beginSettingsDialog() { changingPassword = true } }.disabled(!model.canOperate)
+                            Button(L10n.tr("更改密码…")) {
+                                if model.beginSettingsDialog() { changingPassword = true }
+                            }.disabled(!model.canOperate)
                         }
                         Text(L10n.tr("验证当前密码后更换加密密钥。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Toggle(L10n.tr("在 Apple 钥匙串中记住密码"), isOn: Binding(
                             get: { preferences.rememberPassword },
                             set: { model.setRememberPassword($0) }
-                        )).disabled(!model.canOperate)
+                        )).disabled(!model.canOperate && model.vault != nil)
                         Text(L10n.tr("仅保存在本机钥匙串；关闭后立即移除。"))
                             .font(LibraryStyle.helper).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         if model.passwordStored {
-                            Button(L10n.tr("忘记保存的密码")) { model.forgetStoredPassword() }.disabled(!model.canOperate)
+                            Button(L10n.tr("忘记保存的密码")) { model.forgetStoredPassword() }.disabled(!model.canOperate && model.vault != nil)
                         }
                     }
                 }
+            }
+            .padding(20)
+        }
+    }
+}
+
+struct BotsSettingsTab: View {
+    @ObservedObject private var preferences = AppPreferences.shared
+    @EnvironmentObject private var model: AppModel
+    @Binding var addingBot: Bool
+    @Binding var editingBot: BotInfo?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
                 LibrarySurface(padding: 16) {
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack { Text(L10n.tr("Telegram 机器人")).font(LibraryStyle.sectionTitle); Spacer(); Button(L10n.tr("添加…")) { if model.beginSettingsDialog() { addingBot = true } }.disabled(!model.canOperate) }
+                        HStack {
+                            Text(L10n.tr("Telegram 机器人")).font(LibraryStyle.sectionTitle)
+                            Spacer()
+                            Button(L10n.tr("添加…")) {
+                                if model.beginSettingsDialog() { addingBot = true }
+                            }.disabled(!model.canOperate)
+                        }
                         Divider()
-                        if model.bots.isEmpty { Text(L10n.tr("尚未添加机器人")).font(LibraryStyle.body).foregroundStyle(.secondary) }
+                        if model.bots.isEmpty {
+                            Text(L10n.tr("尚未添加机器人")).font(LibraryStyle.body).foregroundStyle(.secondary)
+                        }
                         ForEach(model.bots) { bot in
                             HStack {
                                 Image(systemName: "paperplane.circle.fill").font(.system(size: 20)).foregroundStyle(.tint)
@@ -105,11 +215,142 @@ struct SettingsView: View {
                                 }
                                 Spacer()
                                 Button(L10n.tr("API 地址…")) { if model.beginSettingsDialog() { editingBot = bot } }.disabled(!model.canOperate)
-                                Toggle(L10n.tr("启用"), isOn: Binding(get: { bot.enabled }, set: { enabled in model.run(L10n.tr("更新机器人")) { vault, _ in try await vault.updateBot(bot.id, enabled: enabled); return OperationResult(L10n.tr("机器人已更新")) } })).toggleStyle(.switch).fixedSize().disabled(!model.canOperate)
+                                Toggle(L10n.tr("启用"), isOn: Binding(
+                                    get: { bot.enabled },
+                                    set: { enabled in
+                                        model.run(L10n.tr("更新机器人")) { vault, _ in
+                                            try await vault.updateBot(bot.id, enabled: enabled)
+                                            return OperationResult(L10n.tr("机器人已更新"))
+                                        }
+                                    }
+                                )).toggleStyle(.switch).fixedSize().disabled(!model.canOperate)
                             }.padding(.vertical, 7)
                         }
                     }
                 }
+            }
+            .padding(20)
+        }
+    }
+}
+
+struct UpdatesSettingsTab: View {
+    @ObservedObject private var preferences = AppPreferences.shared
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                LibrarySurface(padding: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.tr("当前版本")).font(LibraryStyle.sectionTitle)
+                        Divider()
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.tr("桌面客户端 (GUI)")).font(LibraryStyle.body.weight(.medium))
+                                Text(L10n.tr("TAS.app · 图形界面")).font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("v\(model.guiVersion)").font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                        }
+                        Divider()
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L10n.tr("命令行工具 (CLI)")).font(LibraryStyle.body.weight(.medium))
+                                Text(L10n.tr("内置 tas · 独立版本号，随应用包分发")).font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(model.cliVersion.map { "v\($0)" } ?? L10n.tr("检测中…"))
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                        }
+                    }
+                }
+
+                LibrarySurface(padding: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.tr("软件更新")).font(LibraryStyle.sectionTitle)
+                        Divider()
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L10n.tr("自动检查最新版本")).font(LibraryStyle.body)
+                                Text(L10n.tr("开启后，应用将在启动时自动检查新版本，发现更新时弹窗提示安装。"))
+                                    .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Toggle(L10n.tr("自动检查最新版本"), isOn: $preferences.autoCheckUpdates)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                        }
+
+                        Divider()
+
+                        HStack {
+                            if model.checkingUpdate {
+                                ProgressView().controlSize(.small)
+                                Text(L10n.tr("正在查询 GitHub Release…"))
+                                    .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            } else if model.installingUpdate {
+                                ProgressView().controlSize(.small)
+                                Text(L10n.tr("正在下载并校验安装包…"))
+                                    .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            } else if let update = model.availableUpdate {
+                                Label(L10n.tr("发现新版本 %@！", update.version), systemImage: "arrow.down.circle.fill")
+                                    .font(LibraryStyle.helper).foregroundStyle(TASDesign.accent)
+                            } else {
+                                Text(L10n.tr("检查并获取最新公开发布版本。"))
+                                    .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Button(L10n.tr("检查更新")) {
+                                Task { await model.checkUpdates(userInitiated: true) }
+                            }
+                            .disabled(model.checkingUpdate || model.installingUpdate)
+                        }
+
+                        if let update = model.availableUpdate {
+                            HStack {
+                                Button(L10n.tr("更新 TAS 至 %@…", update.version)) {
+                                    Task { await model.installUpdate(update) }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.checkingUpdate || model.installingUpdate || model.busy)
+
+                                Link(L10n.tr("查看 Release"), destination: update.releaseURL)
+                                    .font(LibraryStyle.helper)
+                            }
+                        }
+
+                        if let cli = model.latestCLIVersion {
+                            Text(L10n.tr("最新 Release 包含 CLI v%@，更新时将自动同步更新。", cli))
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                        } else {
+                            Text(L10n.tr("CLI 随应用包一同更新。"))
+                                .font(LibraryStyle.helper).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .onAppear {
+            if model.cliVersion == nil {
+                model.probeCLIVersion()
+            }
+        }
+    }
+}
+
+struct MaintenanceSettingsTab: View {
+    @ObservedObject private var preferences = AppPreferences.shared
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
                 LibrarySurface(padding: 16) {
                     DisclosureGroup(L10n.tr("恢复与校验")) {
                         VStack(alignment: .leading, spacing: 12) {
@@ -132,18 +373,23 @@ struct SettingsView: View {
                     }
                     .font(LibraryStyle.sectionTitle)
                 }
-            }.padding(28).frame(maxWidth: 900, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }.tasCanvas()
-            .sheet(isPresented: $addingBot, onDismiss: { model.endSettingsDialog() }) { AddBotView() }
-            .sheet(item: $editingBot, onDismiss: { model.endSettingsDialog() }) { bot in EndpointView(bot: bot) }
-            .sheet(isPresented: $changingPassword, onDismiss: { model.endSettingsDialog() }) { ChangePasswordView() }
+            }
+            .padding(20)
+        }
     }
+
     private func rebuild() {
-        let alert = NSAlert(); alert.messageText = L10n.tr("从远端恢复索引？"); alert.informativeText = L10n.tr("当前索引会先备份到文件库目录，再由最近一次远端备份替换。尚未进入备份的文件不会显示在恢复后的索引中。"); alert.addButton(withTitle: L10n.tr("备份并恢复")); alert.addButton(withTitle: L10n.tr("取消"))
-        if alert.runModal() == .alertFirstButtonReturn { model.run(L10n.tr("恢复索引")) { vault, _ in try await vault.rebuildIndex() } }
+        let alert = NSAlert()
+        alert.messageText = L10n.tr("从远端恢复索引？")
+        alert.informativeText = L10n.tr("当前索引会先备份到文件库目录，再由最近一次远端备份替换。尚未进入备份的文件不会显示在恢复后的索引中。")
+        alert.addButton(withTitle: L10n.tr("备份并恢复"))
+        alert.addButton(withTitle: L10n.tr("取消"))
+        if alert.runModal() == .alertFirstButtonReturn {
+            model.run(L10n.tr("恢复索引")) { vault, _ in try await vault.rebuildIndex() }
+        }
     }
 }
+
 struct ChangePasswordView: View {
     @ObservedObject private var preferences = AppPreferences.shared
     @EnvironmentObject private var model: AppModel
@@ -185,6 +431,7 @@ struct ChangePasswordView: View {
         }.textFieldStyle(.roundedBorder).padding(28).frame(width: 440)
     }
 }
+
 struct AddBotView: View {
     @ObservedObject private var preferences = AppPreferences.shared
     @EnvironmentObject private var model: AppModel
@@ -197,6 +444,7 @@ struct AddBotView: View {
         }.textFieldStyle(.roundedBorder).padding(28).frame(width: 400)
     }
 }
+
 struct EndpointView: View {
     @ObservedObject private var preferences = AppPreferences.shared
     let bot: BotInfo

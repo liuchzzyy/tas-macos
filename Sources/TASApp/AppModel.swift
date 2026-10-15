@@ -28,6 +28,15 @@ import TASCore
     @Published var selectedFileID: StoredFile.ID?
     @Published var historyFile: StoredFile?
     @Published var historyVersions: [FileVersion] = []
+    @Published var selectedSection: String = "overview"
+    @Published var checkingUpdate = false
+    @Published var installingUpdate = false
+    @Published var availableUpdate: ReleaseUpdate?
+    @Published var cliVersion: String?
+    @Published var latestCLIVersion: String?
+    var guiVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L10n.tr("开发版")
+    }
     @Published private var presentingNativeDialog = false
     var presentingDialog: Bool {
         get { presentingNativeDialog || settingsDialog.isPresented }
@@ -40,7 +49,23 @@ import TASCore
     /// In-memory only: lets "remember password" take effect without a re-unlock.
     /// Never written anywhere except the keychain, and dropped when the vault locks.
     private var sessionPassword: String?
-    init() {}
+    init() {
+        #if !TAS_UI_PREVIEW
+        probeCLIVersion()
+        #endif
+    }
+    func probeCLIVersion() {
+        Task.detached(priority: .utility) {
+            let output = EmbeddedCLIVersionProbe.read(from: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/tas"))
+            await MainActor.run {
+                if let output, output.hasPrefix("tas "), output.hasSuffix(" (Swift)") {
+                    self.cliVersion = String(output.dropFirst(4).dropLast(8))
+                } else {
+                    self.cliVersion = output
+                }
+            }
+        }
+    }
     var configured: Bool {
         #if TAS_UI_PREVIEW
         false
@@ -296,6 +321,122 @@ import TASCore
             let alert = NSAlert(); alert.messageText = L10n.tr("恢复全部文件？"); alert.informativeText = L10n.tr("将按文件库中的路径写入所选目录。同名文件在校验通过后会被替换。"); alert.addButton(withTitle: L10n.tr("恢复")); alert.addButton(withTitle: L10n.tr("取消"))
             if alert.runModal() == .alertFirstButtonReturn { run(L10n.tr("恢复文件")) { vault, progress in try await vault.restoreAll(to: url, progress: progress) } }
         }
+    }
+    func checkUpdates(userInitiated: Bool) async {
+        #if TAS_UI_PREVIEW
+        if userInitiated {
+            let alert = NSAlert()
+            alert.messageText = L10n.tr("界面预览")
+            alert.informativeText = L10n.tr("界面预览 · 不连接网络或文件库")
+            alert.addButton(withTitle: L10n.tr("好"))
+            alert.runModal()
+        }
+        return
+        #else
+        guard !checkingUpdate, !installingUpdate else { return }
+        checkingUpdate = true
+
+        let currentVersion = guiVersion
+        let cliOutput = await Task.detached(priority: .utility) {
+            EmbeddedCLIVersionProbe.read(from: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/tas"))
+        }.value
+        let versions = SoftwareVersions(gui: currentVersion, cliOutput: cliOutput)
+
+        do {
+            var request = URLRequest(url: URL(string: "https://api.github.com/repos/liuchzzyy/tas-macos/releases/latest")!)
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 15
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
+                throw UpdateInstaller.Failure(L10n.tr("GitHub Release 不可用"))
+            }
+            let latest = try ReleaseUpdate(data: data)
+            do {
+                self.latestCLIVersion = try await ReleaseCLIVersion.fetch(tag: latest.tag, guiVersion: latest.version)
+            } catch {
+                self.latestCLIVersion = nil
+            }
+            checkingUpdate = false
+
+            if versions.canInstall(release: latest.version) {
+                availableUpdate = latest
+                let alert = NSAlert()
+                alert.messageText = L10n.tr("发现新版本 TAS %@！", latest.version)
+                alert.informativeText = L10n.tr("当前版本为 %@。下载并校验安装包后将自动退出应用并完成安装。是否立即更新？", currentVersion)
+                alert.addButton(withTitle: L10n.tr("立即更新"))
+                alert.addButton(withTitle: L10n.tr("稍后"))
+                if alert.runModal() == .alertFirstButtonReturn {
+                    await installUpdate(latest)
+                }
+            } else if userInitiated {
+                availableUpdate = nil
+                let alert = NSAlert()
+                if versions.isAhead(of: latest.version) {
+                    alert.messageText = L10n.tr("已是最新版本")
+                    alert.informativeText = L10n.tr("当前安装的 GUI 高于公开 Release（%@），无需更新。", latest.version)
+                } else {
+                    alert.messageText = L10n.tr("已是最新版本")
+                    alert.informativeText = L10n.tr("TAS 目前已是最新版本（%@）。", latest.version)
+                }
+                alert.addButton(withTitle: L10n.tr("好"))
+                alert.runModal()
+            }
+        } catch {
+            checkingUpdate = false
+            if userInitiated {
+                let alert = NSAlert()
+                alert.messageText = L10n.tr("检查更新失败")
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: L10n.tr("好"))
+                alert.runModal()
+            }
+        }
+        #endif
+    }
+    func installUpdate(_ release: ReleaseUpdate) async {
+        #if TAS_UI_PREVIEW
+        return
+        #else
+        guard !installingUpdate, !busy, historyFile == nil else { return }
+        installingUpdate = true
+        defer { installingUpdate = false }
+        do {
+            let currentApp = Bundle.main.bundleURL
+            guard currentApp.standardizedFileURL.path == "/Applications/TAS.app" else {
+                throw UpdateInstaller.Failure(L10n.tr("自动更新仅支持 /Applications/TAS.app；请手动安装 DMG。"))
+            }
+            let helper = currentApp.appendingPathComponent("Contents/Helpers/TASUpdater")
+            guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+                throw UpdateInstaller.Failure(L10n.tr("当前安装缺少更新组件，请手动安装新版。"))
+            }
+            let prepared = try await Task.detached(priority: .userInitiated) {
+                try await UpdateInstaller.prepare(release, helper: helper)
+            }.value
+            guard !busy, historyFile == nil, !presentingDialog else {
+                try? FileManager.default.removeItem(at: prepared.app.deletingLastPathComponent())
+                throw UpdateInstaller.Failure(L10n.tr("下载期间开始了文件库操作；请待其完成后重新检查更新。"))
+            }
+            let report = UpdateInstaller.resultURL
+            try FileManager.default.createDirectory(at: report.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: report)
+            let process = Process()
+            process.executableURL = prepared.helper
+            process.arguments = [prepared.app.path, currentApp.path, release.version,
+                                 "\(ProcessInfo.processInfo.processIdentifier)", report.path]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            if canOperate { lock() }
+            NSApp.terminate(nil)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = L10n.tr("更新失败")
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: L10n.tr("好"))
+            alert.runModal()
+        }
+        #endif
     }
 }
 #endif

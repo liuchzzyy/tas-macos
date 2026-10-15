@@ -119,28 +119,33 @@ struct UploadDropZone: View {
         case .filesAndFolders: L10n.tr("一次性上传，保留文件夹层级")
         }
     }
+    private var dropIconName: String {
+        switch kind {
+        case .folders: return "folder.badge.plus"
+        case .files: return "doc.badge.plus"
+        case .filesAndFolders: return "arrow.up.doc"
+        }
+    }
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             ZStack {
-                Circle().fill(TASDesign.selected).frame(width: 38, height: 38)
-                HStack(spacing: 2) {
-                    Image(systemName: "doc.badge.plus")
-                    if kind != .files { Image(systemName: "folder.badge.plus") }
-                }.font(.system(size: 14, weight: .medium)).foregroundStyle(TASDesign.accent)
+                Circle().fill(TASDesign.selected).frame(width: 48, height: 48)
+                Image(systemName: dropIconName)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(TASDesign.accent)
             }
-            VStack(spacing: 2) {
-                Text(title).font(LibraryStyle.body.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+            VStack(spacing: 4) {
+                Text(title).font(.system(size: 14, weight: .semibold))
+                Text(detail).font(LibraryStyle.helper).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }
-            Text(L10n.tr("点击选择")).font(.caption).foregroundStyle(TASDesign.accent)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 16).padding(.vertical, 14)
+        .padding(.horizontal, 20).padding(.vertical, 28)
         .background(targeted ? TASDesign.selected : TASDesign.dropZone, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12)
             .strokeBorder(targeted ? TASDesign.accent : TASDesign.dropBorder,
-                          style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: [6])))
+                          style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: [6, 4])))
         .contentShape(RoundedRectangle(cornerRadius: 12))
         .opacity(acceptsInput ? 1 : 0.55)
         .onTapGesture { if acceptsInput { model.chooseUpload() } }
