@@ -68,6 +68,24 @@ final class CoreTests: XCTestCase {
         XCTAssertFalse(release.isNewer(than: "1.3.0"))
         XCTAssertEqual(release.downloadURL.lastPathComponent, "TAS-1.2.0-arm64.dmg")
         XCTAssertThrowsError(try ReleaseUpdate(data: Data(#"{"tag_name":"oops","html_url":"https://evil.example"}"#.utf8)))
+        let manual = try ReleaseUpdate(
+            tag: "v1.4.6",
+            version: "1.4.6",
+            releaseURL: URL(string: "https://github.com/liuchzzyy/tas-macos/releases/tag/v1.4.6")!,
+            downloadURL: URL(string: "https://github.com/liuchzzyy/tas-macos/releases/download/v1.4.6/TAS-1.4.6-arm64.dmg")!,
+            expectedSHA256: String(repeating: "f", count: 64),
+            expectedSize: 5678
+        )
+        XCTAssertEqual(manual.version, "1.4.6")
+        XCTAssertEqual(manual.expectedSize, 5678)
+        XCTAssertThrowsError(try ReleaseUpdate(
+            tag: "invalid",
+            version: "invalid",
+            releaseURL: URL(string: "http://insecure.example")!,
+            downloadURL: URL(string: "http://insecure.example")!,
+            expectedSHA256: "too-short",
+            expectedSize: 0
+        ))
     }
     func testReleaseRequiresAuthenticatedDigestForAutomaticInstall() throws {
         let payload = Data(#"{"tag_name":"v1.2.0","html_url":"https://github.com/liuchzzyy/tas-macos/releases/tag/v1.2.0","assets":[{"name":"TAS-1.2.0-arm64.dmg","browser_download_url":"https://github.com/liuchzzyy/tas-macos/releases/download/v1.2.0/TAS-1.2.0-arm64.dmg","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1234}]}"#.utf8)

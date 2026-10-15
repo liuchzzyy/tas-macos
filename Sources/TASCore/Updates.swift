@@ -96,6 +96,96 @@ public struct ReleaseUpdate: Sendable {
         expectedSHA256 = String(digest.dropFirst(7)).lowercased()
         expectedSize = size
     }
+    public init(tag: String, version: String, releaseURL: URL, downloadURL: URL, expectedSHA256: String, expectedSize: Int64) throws {
+        guard Self.isValidVersion(version),
+              releaseURL.scheme == "https", releaseURL.host == "github.com",
+              downloadURL.scheme == "https", downloadURL.host == "github.com",
+              expectedSHA256.count == 64, expectedSHA256.allSatisfy({ $0.isASCII && $0.isHexDigit }),
+              expectedSize > 0 else {
+            throw NSError(domain: "TAS.Update", code: 1, userInfo: [NSLocalizedDescriptionKey: "最新 Release 缺少有效版本或 arm64 DMG 下载地址"])
+        }
+        self.tag = tag
+        self.version = version
+        self.releaseURL = releaseURL
+        self.downloadURL = downloadURL
+        self.expectedSHA256 = expectedSHA256.lowercased()
+        self.expectedSize = expectedSize
+    }
+
+    /// Fetch latest release via REST API with rate-limit-immune web fallback.
+    public static func fetchLatest() async throws -> ReleaseUpdate {
+        if let update = try? await fetchViaREST() {
+            return update
+        }
+        return try await fetchViaWeb()
+    }
+
+    private static func fetchViaREST() async throws -> ReleaseUpdate {
+        var request = URLRequest(url: URL(string: "https://api.github.com/repos/liuchzzyy/tas-macos/releases/latest")!)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
+        if let token = ProcessInfo.processInfo.environment["GITHUB_TOKEN"] ?? ProcessInfo.processInfo.environment["GH_TOKEN"] {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.timeoutInterval = 10
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw NSError(domain: "TAS.Update", code: 2, userInfo: [NSLocalizedDescriptionKey: "GitHub Release 不可用"])
+        }
+        return try ReleaseUpdate(data: data)
+    }
+
+    private static func fetchViaWeb() async throws -> ReleaseUpdate {
+        let latestURL = URL(string: "https://github.com/liuchzzyy/tas-macos/releases/latest")!
+        var latestReq = URLRequest(url: latestURL)
+        latestReq.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
+        latestReq.timeoutInterval = 15
+        let (_, latestResp) = try await URLSession.shared.data(for: latestReq)
+        guard let http = latestResp as? HTTPURLResponse,
+              let finalURL = http.url,
+              finalURL.host == "github.com",
+              finalURL.path.hasPrefix("/liuchzzyy/tas-macos/releases/tag/") else {
+            throw NSError(domain: "TAS.Update", code: 3, userInfo: [NSLocalizedDescriptionKey: "GitHub Release 不可用"])
+        }
+        let tag = finalURL.lastPathComponent
+        let version = String(tag.drop(while: { $0 == "v" }))
+        guard isValidVersion(version) else {
+            throw NSError(domain: "TAS.Update", code: 4, userInfo: [NSLocalizedDescriptionKey: "GitHub Release 不可用"])
+        }
+
+        let shaURL = URL(string: "https://github.com/liuchzzyy/tas-macos/releases/download/\(tag)/TAS-\(version)-arm64.dmg.sha256")!
+        var shaReq = URLRequest(url: shaURL)
+        shaReq.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
+        shaReq.timeoutInterval = 15
+        let (shaData, shaResp) = try await URLSession.shared.data(for: shaReq)
+        guard let shaHttp = shaResp as? HTTPURLResponse, shaHttp.statusCode == 200,
+              let shaText = String(data: shaData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let rawHash = shaText.split(separator: " ").first.map(String.init),
+              rawHash.count == 64, rawHash.allSatisfy({ $0.isASCII && $0.isHexDigit }) else {
+            throw NSError(domain: "TAS.Update", code: 5, userInfo: [NSLocalizedDescriptionKey: "GitHub Release 不可用"])
+        }
+
+        let dmgURL = URL(string: "https://github.com/liuchzzyy/tas-macos/releases/download/\(tag)/TAS-\(version)-arm64.dmg")!
+        var dmgReq = URLRequest(url: dmgURL)
+        dmgReq.httpMethod = "HEAD"
+        dmgReq.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
+        dmgReq.timeoutInterval = 15
+        let (_, dmgResp) = try await URLSession.shared.data(for: dmgReq)
+        guard let dmgHttp = dmgResp as? HTTPURLResponse, dmgHttp.statusCode == 200,
+              dmgHttp.expectedContentLength > 0 else {
+            throw NSError(domain: "TAS.Update", code: 6, userInfo: [NSLocalizedDescriptionKey: "GitHub Release 不可用"])
+        }
+
+        let releaseURL = URL(string: "https://github.com/liuchzzyy/tas-macos/releases/tag/\(tag)")!
+        return try ReleaseUpdate(
+            tag: tag,
+            version: version,
+            releaseURL: releaseURL,
+            downloadURL: dmgURL,
+            expectedSHA256: rawHash.lowercased(),
+            expectedSize: dmgHttp.expectedContentLength
+        )
+    }
     public static func isValidVersion(_ version: String) -> Bool { parts(version) != nil }
     private static func parts(_ version: String) -> [Int]? {
         let values = version.split(separator: ".", omittingEmptySubsequences: false)

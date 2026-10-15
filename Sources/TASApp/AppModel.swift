@@ -343,15 +343,7 @@ import TASCore
         let versions = SoftwareVersions(gui: currentVersion, cliOutput: cliOutput)
 
         do {
-            var request = URLRequest(url: URL(string: "https://api.github.com/repos/liuchzzyy/tas-macos/releases/latest")!)
-            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            request.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
-            request.timeoutInterval = 15
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
-                throw UpdateInstaller.Failure(L10n.tr("GitHub Release 不可用"))
-            }
-            let latest = try ReleaseUpdate(data: data)
+            let latest = try await ReleaseUpdate.fetchLatest()
             do {
                 self.latestCLIVersion = try await ReleaseCLIVersion.fetch(tag: latest.tag, guiVersion: latest.version)
             } catch {

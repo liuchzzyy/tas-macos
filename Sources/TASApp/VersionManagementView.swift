@@ -136,22 +136,13 @@ struct VersionManagementView: View {
         checking = true; status = nil; release = nil; latestVersion = nil; latestCLI = nil; checkedCLI = false; releaseNotes = nil
         defer { checking = false }
         do {
-            var request = URLRequest(url: URL(string: "https://api.github.com/repos/liuchzzyy/tas-macos/releases/latest")!)
-            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            request.setValue("TAS-macOS", forHTTPHeaderField: "User-Agent")
-            request.timeoutInterval = 15
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
-                throw UpdateInstaller.Failure(L10n.tr("GitHub Release 不可用"))
-            }
-            let latest = try ReleaseUpdate(data: data)
+            let latest = try await ReleaseUpdate.fetchLatest()
             latestVersion = latest.version
             // A GUI release tag does not imply a CLI version. Fetch the tagged
             // package declaration independently; show unavailable on failure.
             do { latestCLI = try await ReleaseCLIVersion.fetch(tag: latest.tag, guiVersion: latest.version) }
             catch { latestCLI = nil }
             checkedCLI = true
-            releaseNotes = (try? JSONDecoder().decode(ReleaseNotes.self, from: data))?.body
             release = latest
             updateDecision(for: latest.version)
         } catch { status = L10n.tr("检查更新失败：%@", String(describing: error.localizedDescription)); release = nil; latestVersion = nil; latestCLI = nil; checkedCLI = false; releaseNotes = nil }
