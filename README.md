@@ -1,188 +1,148 @@
 # TAS for Mac
 
-用 **Swift + SwiftUI** 重写的 TAS（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套文件处理代码；运行和构建均不需要 npm、Node.js、Electron、WebView 或 Rust。
+用 **Swift + SwiftUI** 构建的原生 macOS 客户端与命令行工具（Telegram as Storage）。原生 macOS 界面、Swift 核心和 `tas` 命令行共用同一套底层架构；运行与构建完全基于原生平台，不依赖 Node.js、Electron、WebView 或任何非原生运行时。
 
-当前发布 v1.4.6 要求 macOS 26+ 和 Apple Silicon（arm64）。此前发布的 v1.1.0 支持 macOS 13+；升级系统要求适用于 v1.1.1 及之后的版本。
+系统要求：**macOS 26+**，**Apple Silicon（arm64）**。
 
-## GUI 1.4.6（CLI 1.4.1）
+---
 
-- GUI 版本为 **1.4.6（build 16）**，内置 CLI 为 **1.4.1**。Release 标签代表 GUI 版本。
-- **macOS 原生设置体系（Settings · ⌘,）**：设置从应用主窗口完全剥离为标准 Mac Settings 场景，提供常规、文件库、机器人、更新、维护五个原生 Tab 分栏。
-- **软件更新管理纳入原生设置**：新增“自动检查最新版本”开关（默认关闭），开启后自启与后台自动检测并弹窗更新；设置中支持同步查看 GUI 与内置 CLI 的当前及最新版本。
-- **主界面与交互优化**：
-  - 左下角设置图标改为更新图标（`arrow.triangle.2.circlepath`），点击即时触发更新检查，有新版本弹窗确认安装，最新版本友好提示。
-  - 外观（浅色/深色/跟随系统）与语言快捷切换组件恢复至主窗口最左下角。
-  - 侧边栏移除“设置”与“版本管理”，聚焦核心文件管理与同步流程。
-  - “文件（文件夹）上传”拖放框深度重塑：扩充内部呼吸感与内边距，移除拥挤的“点击选择”文案，图标升级为清晰独立的上传气泡。
-  - 全局菜单栏深度适配（文件、显示 ⌘1~⌘5、文件库操作与访达集成），移除了冗余的菜单项。
-- 设置新增“启动与窗口”卡片：**开机自启**（登录项，经 `SMAppService` 注册签名登录助手，仅在 `/Applications` 下可用）、**静默启动**（仅登录自启时不显示窗口）、**关闭行为**（退出 TAS／保留在菜单栏）。默认均为关闭/退出，不改变原有习惯。选择保留在菜单栏时文件库保持解锁，可从菜单栏图标重新打开或退出。
-- 登录助手 `TASLoginHelper.app` 内嵌于 `Contents/Library/LoginItems`，不向用户目录写 LaunchAgent 或 plist；以私有参数 `--tas-login-launch` 打开主程序。
-- 可选择将登录密码保存在本机 Apple 登录钥匙串，后续启动自动解锁；默认关闭。更改密码后同步更新钥匙串，关闭选项或点“忘记保存的密码”会移除凭据。手动锁定不会立刻自动解锁。此功能并非独立备份，且不应在不受信任的 Mac 账户上启用。
-- “所有文件”中的文件夹现可单选/多选，与文件混选；下载保留逻辑目录层级，删除作用于文件夹的全部后代文件（包括折叠或被搜索过滤隐藏的文件），并先显示确认。空目录仍不独立保存。
-- “文件同步”的虚线框支持 Finder 文件/文件夹拖入和点击选择；混选先整体校验再上传，拒绝符号链接及远端 URL。图标和文字改为居中分层排列。
-- “文件同步”页面将文件与文件夹的一次性上传合并为同一个按钮和拖放区；持续同步仍需单独添加目录。同名文件仍可确认保存为新版本。
-- 文件夹拖放用于一次性递归上传，保留顶层目录；持续同步仍须明确添加同步目录，不会因拖放自动启用。
-- 支持简体中文／English 与亮色／暗色／跟随系统，选择会保存；主机器人显示“主机器人（primary）”，存储标识不变。
-- GUI 1.2.0 的旧更新器假定 GUI/CLI 同版本，因此首次升级至分离版本需手动安装 DMG；1.2.1 起按签名应用包的 `TASCLIVersion` 声明校验内置 CLI。
+## 核心特性
 
-## 获取与运行
+- **macOS 原生设置体系（Settings · ⌘,）**：偏好设置采用标准 macOS 设置窗口设计，集成常规、文件库、机器人、更新、维护 5 个独立分栏。
+- **全局菜单栏与常驻状态图标**：
+  - 屏幕顶部系统菜单栏提供完整工作区快捷切换（`⌘1`~`⌘5`）、文件上传（`⌘U`）、目录同步（`⌘⇧O`）、立即同步（`⌘R`）、备份索引（`⌘⇧B`）与锁定（`⌘⇧L`）。
+  - 右上角常驻状态栏图标（MenuBarExtra）实时反映文件库解锁/锁定状态、同步中动态图标与统计信息。
+- **全自动与即时版本更新**：
+  - 支持应用启动时自动检查更新（默认关闭，可在原生设置中启用），发现新版弹窗一键升级并自动重启。
+  - 侧边栏左下角提供即时检查更新按钮；原生设置中同步显示桌面客户端（GUI）与内置命令行工具（CLI）的版本状态。
+- **安全端到端加密**：
+  - 基于 AES-256-GCM 与 PBKDF2-SHA512（600,000 次迭代）的本地流式加密。
+  - 密码更改采用代际密钥机制：**新上传使用新一代密钥**，**已有内容仍使用过去代密钥**；旧密码仍可解密**旧版密文**，不能撤销。
+  - 可选将登录密码安全保存在本机 Apple 钥匙串中以实现开机与启动自动解锁。
+- **完整的文件版本管理**：
+  - 支持文件历史版本查看、指定版本下载与按需回滚恢复；恢复版本自动作为新版本追加，不破坏历史完整性。
+  - 支持软删除与彻底清除机制，软删除文件保留完整历史并支持随时恢复。
+- **高效文件传输与同步**：
+  - 统一的拖拽上传中心：支持文件与完整文件夹层级拖拽，19 MiB 自动分块，断点续传。
+  - 本地文件夹持续同步：支持后台每 30 秒自动检测本地变更并增量推送。
+  - Telegram 多机器人负载均衡与分块多路上传。
+  - 加密远端索引备份与一键灾难恢复。
+- **系统级集成体验**：
+  - 支持登录后开机自启（经由系统 `SMAppService` 安全托管的独立登录助手）、静默自启、关闭窗口保留在后台菜单栏。
+  - 主界面左下角提供即时外观切换（浅色/深色/跟随系统）与语言切换（简体中文/English）。
 
-从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.4.6) 下载 [TAS-1.4.6-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.4.6/TAS-1.4.6-arm64.dmg)（[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.4.6/TAS-1.4.6-arm64.dmg.sha256)）。需要 macOS 13–25 的用户请使用先前的 [v1.1.0](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.1.0)。仓库已公开，无须登录即可下载。
+---
 
-打开 DMG，将 `TAS.app` 拖入“应用程序”。当前构建使用临时签名，**尚未使用 Apple Developer ID 签名或公证**。如果 macOS 阻止打开，在“系统设置 → 隐私与安全性”中允许这次打开。
+## 获取与安装
 
-从源码编译但未发布的开发构建，也可在 [Actions](https://github.com/liuchzzyy/tas-macos/actions/workflows/macos.yml) 下载 `TAS-macOS-arm64` artifact；GitHub 会先将 artifact 打包为 ZIP，解压后才是 DMG。
+### 预编译安装包
 
-首次使用填写 Bot Token、Chat ID 和加密密码。新文件库密码至少 12 位，并包含大小写字母、数字和符号；创建界面逐项提示，已有文件库仍可用原密码解锁。请先在 Telegram 中向机器人发送 `/start`；群组需将机器人加入群组并授予发送文件权限。Token 加密保存在本地，密码只保留在解锁会话中。侧栏“版本管理”分别显示 GUI 与应用包内 CLI 的当前版本及 GitHub 最新 Release，可检查更新并确认安装，无须 GitHub CLI；设置页不再重复显示软件版本。自动安装仅支持位于 `/Applications/TAS.app` 且目录可写的应用，否则使用 Releases 手动安装。更新前会校验 Release 的 SHA-256 与应用签名，退出旧程序后备份旧 App 并重启；不会由更新程序修改文件库数据。
+从 [GitHub Releases](https://github.com/liuchzzyy/tas-macos/releases/tag/v1.4.6) 下载：
+- **[TAS-1.4.6-arm64.dmg](https://github.com/liuchzzyy/tas-macos/releases/download/v1.4.6/TAS-1.4.6-arm64.dmg)**
+- **[SHA-256 校验文件](https://github.com/liuchzzyy/tas-macos/releases/download/v1.4.6/TAS-1.4.6-arm64.dmg.sha256)**
 
-已有 TAS 用户可以直接选择原来的 `~/.tas` 目录并输入原密码。请先退出旧客户端，并备份整个数据目录；原生版使用进程锁防止同时写入，但旧版部分命令不遵守此锁。
+校验并安装：
+```sh
+shasum -a 256 -c TAS-1.4.6-arm64.dmg.sha256
+```
+打开 DMG 并将 `TAS.app` 拖入“应用程序”（`/Applications`）目录。
 
-## 文件版本历史（v1.1.0）
+> **提示**：当前构建使用 ad-hoc 签名。首次打开时若提示未受信任，请在 macOS「系统设置 ▸ 隐私与安全性」中允许打开。
 
-v1.1.0 引入文件版本历史。升级真实文件库前请先独立备份整个数据目录；可先在独立测试文件库中验证流程。
+### 首次配置
 
-- 一个完整逻辑路径对应一个稳定文件 ID。更新只新增版本，列表默认显示当前版本。
-- 与当前版本内容相同的更新跳过；与历史版本相同但与当前不同的内容仍可成为新版本。
-- 恢复历史版本会追加一个新版本，保留恢复前的所有版本；不直接修改本机同步源文件。
-- 恢复会暂停该逻辑路径的自动上传，防止下一轮同步立即把本机内容重新设为当前版本。整理好本机源文件后显式恢复同步。
-- 普通删除保留历史；永久清除必须先软删除，再单独确认。默认不自动清理历史。
+1. 打开应用，输入 **Bot Token**、**Chat ID** 并设定加密密码（至少 12 位，包含大小写字母、数字及符号）。
+2. 在 Telegram 中向机器人发送 `/start`。若在群组中使用，请确保机器人已入群并具有发送媒体文件的权限。
+3. 进入应用后，所有凭据加密存储于本地配置文件 `~/.tas/config.json`，密码仅在解锁会话期间驻留内存。
+
+---
+
+## 命令行工具（tas CLI）
+
+应用包内自带独立的 `tas` 命令行工具，位于：
+```sh
+/Applications/TAS.app/Contents/Helpers/tas
+```
+
+建议在 shell 配置文件中添加别名：
+```sh
+alias tas="/Applications/TAS.app/Contents/Helpers/tas"
+```
+
+### 常用命令示例
 
 ```sh
-# 初次上传及更新（--replace 兼容旧命令，但现在保留历史）
+# 初始配置
+tas init
+
+# 上传文件（支持备注与追加新版本）
 tas push report.pdf --name documents/report.pdf --message "初稿"
 tas push report.pdf --name documents/report.pdf --new-version --message "修订稿"
+
+# 查看版本历史与详情
 tas history documents/report.pdf --json
 
-# 取回历史内容，不改变当前版本
+# 取回历史版本（不改变当前最新版本）
 tas pull documents/report.pdf --version 1 --output ~/Downloads/report-v1.pdf
 
-# 追加一个内容来自 v1 的新版本，并暂停该路径同步
+# 将指定历史版本恢复为最新版本（会暂停该路径的自动同步）
 tas restore documents/report.pdf --version 1 --message "恢复初稿"
 tas sync resume documents/report.pdf
 
-# 软删除仍可查看历史和恢复
-tas delete documents/report.pdf
-tas list --deleted
-tas history documents/report.pdf
-tas restore documents/report.pdf --version 1
+# 软删除与彻底清除
+tas delete documents/report.pdf              # 软删除（仍保留历史，可恢复）
+tas list --deleted                           # 查看已删除项
+tas delete documents/report.pdf --hard --yes # 永久清除（不可撤销）
 
-# 永久清除：先软删除，再明确确认；不可撤销
-tas delete documents/report.pdf
-tas delete documents/report.pdf --hard --yes
-
+# 状态统计与完整性校验
 tas status --json
-tas verify --all-versions --deep
+tas verify --deep --all-versions
+
+# 目录同步
+tas sync add ~/Documents/Notes
+tas sync start --watch
+
+# 加密索引备份与恢复
+tas index backup
+tas index rebuild
 ```
 
-`--version` 在下载／恢复命令中是该文件内的正整数版本号；单独运行 `tas --version` 查看程序版本。文件参数支持稳定 ID 或完整逻辑路径；纯数字路径可加 `./` 前缀避免被解释为 ID。`list --deleted` 只列出已删除文件。
+---
 
-升级前应退出旧客户端并独立备份整个数据目录。历史功能涉及新的索引格式，**升级后的文件库不要再交给旧客户端写入**。旧索引中仍存在的文件可以迁移为初始版本，但此前已经因覆盖丢失索引的版本无法凭空找回。历史记录必须随加密远端索引备份；若远端索引备份失败，应保留本地数据库并重试 `tas index backup`，不能把本地成功误认为异地备份完成。当前远端索引仍有单条消息大小限制，不会通过静默丢弃历史来缩小索引。
+## 从源码构建与测试
 
-GUI 的侧栏“版本管理”现在用于 **GUI 与内置 CLI 软件版本**；文件版本历史则在“所有文件”或“已删除”中选中文件后，通过工具栏、右键菜单或“文件库”菜单打开“版本历史…”。新版 GUI 移除独立的新版本上传区，同名上传时仍可确认追加版本。“已删除”侧栏保留被删除文件及其历史；恢复会追加新版本，永久清除另行确认。在“文件同步”页同名上传／拖入会提示保存为新版本或改用其他逻辑路径。v1.1.1 增加浅色概览与侧栏导航；v1.1.2 参考 EasyCLIProxyAPI 的浅色卡片层级，调整概览与侧栏底部状态卡。1.2.1 将语言／主题占位替换为可即时切换并持久保存的控件。
-
-`status --json` 的 `originalBytes` 是活动文件当前版本的原始大小合计；`storedBytes` 是全部保留版本引用的去重内容对象存储大小；`historyBytes` 是其中未被任何活动当前版本引用的部分（包含已删除文件）。两种存储量均不含分块头和索引消息，恢复复用内容不会重复计数。
-
-可重复验证：
+环境要求：macOS 26+，Apple Silicon Mac，Xcode Command Line Tools / Swift 6.2+。
 
 ```sh
-swift test -c release
-python3 scripts/test-history-cli.py --binary .build/release/tas
-./scripts/build-macos.sh
-```
-
-CLI 测试使用隔离目录和本机 HTTP fixture，不访问真实 Telegram 或 `~/.tas`。`scripts/smoke-history-gui.swift` 检查锁定态原生菜单，需要执行环境已有 Accessibility 权限；这不等同于解锁后的完整 GUI 交互验收。
-
-恢复、软删除、永久清除和解除同步暂停使用加密持久化发布日志协调 SQLite 与远端索引指针。启动时先完成未结束的发布，再允许后续修改；旧远端索引仅在本地与指针均完成后清理。崩溃可能留下未引用的远端消息，不会为了清理空间冒险删除仍被引用的内容。
-
-历史版本仍依赖 Telegram 消息、机器人配置、密码和恢复索引。版本历史不是独立备份，不能防御同一存储账户失效。
-
-## 功能
-
-- 中英文 SwiftUI 文件库：可展开的文件夹层级、完整路径搜索、标签、下载、删除和原生文件选择器。
-- 上传统一位于“文件同步”：可通过一个按钮或拖放区混选多个文件和文件夹。一次性文件夹上传保留顶层目录与子目录，不自动添加持续同步；忽略目录内隐藏项，不保存空文件夹，不跟随符号链接。“所有文件”和“已删除”支持多选后批量下载、删除或永久清除；永久清除逐个执行且不可撤销。
-
-- “文件（文件夹）上传”用于一次性上传，“文件夹同步”需单独添加目录并持续检查变化。
-- 设置中的“更改密码”验证当前登录密码、检查新密码强度，并更新本机登录凭据和加密密钥代际。**新上传使用新一代密钥；已有内容仍使用过去代密钥，不会重新加密**，仍可通过新登录密码访问。旧密码仍可解密旧版密文（包括此前导出的副本），因此更改密码不能撤销或销毁已泄露的旧版密文。
-- AES-256-GCM 加密、gzip 压缩、19 MiB 分块和流式文件处理。
-- 持久化上传队列，网络中断或退出后可继续上传，不依赖原文件仍然存在。
-- 下载完成后校验认证标签、原始大小和 SHA-256，再原子替换目标文件。
-- 多机器人分配；按分块记录机器人归属，停用机器人仍可读取已有文件。
-- 加密远端索引备份／恢复。恢复前备份本地 SQLite；删除时远端索引更新失败会回滚本地记录。
-- 文件夹手动同步和应用运行期间每 30 秒自动检查；可按逻辑路径恢复全部文件。
-- 原生 Swift 命令行：上传、下载、搜索、标签、续传、机器人管理、同步、校验和诊断。
-
-这是原生版本的首个实现。**旧 Node 版的 HTTP 临时分享服务和 macFUSE 挂载尚未移植**；本版本不注册 Finder 虚拟磁盘。同步仅上传新增／修改，不镜像删除；当前源码会在上传前检测多个同步目录的同名相对路径，并拒绝有冲突的整轮同步（已发布 v1.0.1 的旧行为是更新同一份文件）。
-
-## 从源码构建
-
-需要 macOS 26、Apple Silicon Mac、Xcode 26 / Swift 6.2+：
-
-```sh
+# 克隆仓库
 git clone https://github.com/liuchzzyy/tas-macos.git
 cd tas-macos
+
+# 运行自动化测试套件
 swift test -c release
+
+# 运行 UI 契约与版本验证
+python3 scripts/test-workspace-ui.py
+python3 scripts/test-version-contract.py
+
+# 编译并打包 Release DMG
 ./scripts/build-macos.sh
+
+# 打开打包后的应用
 open dist/TAS.app
 ```
 
-`Package.resolved` 固定依赖版本。系统库使用 SQLite、zlib、CommonCrypto、CryptoKit；[CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift) 1.10.0 提供兼容旧文件格式的流式 AES-GCM。没有 Node 原生模块或浏览器运行时。CryptoSwift 保留其原始许可，构建脚本会将许可放入应用包。
-
-`swift test -c release` 也可在装有 SQLite/zlib 开发库的 Linux + Swift 6 上运行核心测试；SwiftUI 应用必须在 macOS 构建。正式签名可设置 `TAS_SIGN_IDENTITY`；公证凭据不包含在仓库中。
-
-## 构建与清理
-
-`scripts/cleanup.sh` 默认只做 dry-run，打印将要处理的对象：
+### 清理缓存与临时文件
 
 ```sh
-./scripts/cleanup.sh                  # 预览：构建缓存、多余 worktree、旧更新备份、过期 DMG
-./scripts/cleanup.sh --apply           # 执行；删除项一律移入废纸篓，可恢复
-./scripts/cleanup.sh --apply --build   # 同时删除 SwiftPM 构建缓存（.build/.swiftpm，可重新生成）
-./scripts/cleanup.sh --apply --dist    # 同时移走版本号已过期的 dist/TAS-*.dmg
+./scripts/cleanup.sh                  # 预览待清理项目
+./scripts/cleanup.sh --apply           # 执行清理（移入废纸篓）
+./scripts/cleanup.sh --apply --build   # 同时清理 SwiftPM 构建缓存
+./scripts/cleanup.sh --apply --dist    # 同时清理旧版本 DMG 产物
 ```
 
-规则与边界：
+---
 
-- 文件库数据（`~/.tas`）、数据库迁移备份（`index-before-versions-*.db`）以及**最新一个** `/Applications/.TAS-backup-*.app` 永不删除——后者是已安装应用唯一的回滚副本。
-- worktree 只在工作区干净时移除；有未提交改动的会被保留并报告。
-- 移入废纸篓不等于释放磁盘；确认无误后自行清空废纸篓。
-- 检查中间产物或预览构建时，用 `swift build --scratch-path <临时目录>` 把构建产物放在源码树之外；这些目录也可随时整目录移入废纸篓。
+## 开源协议
 
-## 命令行
-
-安装后的命令行位于：
-
-```sh
-/Applications/TAS.app/Contents/Helpers/tas --help
-```
-
-开发时可用 `swift run -c release tas --help`。示例：
-
-```sh
-tas init
-tas push ~/Documents/report.pdf --name documents/report.pdf
-tas list
-tas pull documents/report.pdf --output ~/Downloads/report.pdf
-tas resume
-tas index backup
-tas verify --deep
-tas sync add ~/Documents/Notes
-tas sync start --watch
-```
-
-`tas` 需加入 PATH 或使用完整路径。支持 `TAS_DATA_DIR`、`TAS_PASSWORD`、`TAS_BOT_TOKEN`、`TAS_CHAT_ID`，也可用 `--data-dir` 和 `--password-file`。交互密码／Token 不回显。自动化优先使用权限 600 的单行密码文件。CLI 和图形界面不能同时解锁同一文件库。
-
-## 兼容性与数据保护
-
-读取 v1 明文 Token、v2 加密 Token 和 v3 机器人池配置，写入机器人设置时升级为 v3 加密配置并保留未知字段。兼容 600,000 次 PBKDF2-SHA512、旧密码校验值、WAS1 头、既有 SQLite 表、待续传记录和远端 manifest。旧索引的唯一 hash 约束迁移前会自动备份。
-
-配置和索引默认位于 `~/.tas`。`config.json`、加密密码与远端索引指针共同用于恢复；丢失这些信息时，单靠 Telegram 消息无法可靠重建整个文件库。请始终保留独立备份。Telegram Bot API 不是持久性存储服务；旧版超过托管 API 下载上限的分块需配置本地 Bot API。
-
-测试使用旧 Node `Encryptor` 实际生成的公开样本，覆盖密码派生、空文件、中文、流式加解密、损坏拒绝、权限、符号链接路径拒绝、索引迁移、续传、机器人归属、删除回滚和恢复。网络测试使用本地 fake，不上传真实文件或使用真实 Token。
-
-## 大小与性能
-
-每次 macOS CI 构建输出应用目录与 DMG 大小、架构和 CLI 启动测量，随 artifact 提供 `build-report-*.txt`。移除 Electron 的浏览器运行时能减少分发内容；具体体积以构建产物为准。
-
-Swift 原生界面有利于降低界面运行时开销，但不代表所有处理都会更快：网络速度仍受 Telegram 和网络限制；为了兼容旧格式，8 MiB 以内的文件使用 Apple CryptoKit 加速，大文件 AES-GCM 使用 CryptoSwift 流式处理，吞吐量需要单独实测，不能直接假定高于 Node/OpenSSL。
-
-源项目：[ixchio/tas](https://github.com/ixchio/tas)。MIT 许可与上游署名保留在 `LICENSE` 中。
+本项目采用 MIT 许可协议。原项目：[ixchio/tas](https://github.com/ixchio/tas)。
